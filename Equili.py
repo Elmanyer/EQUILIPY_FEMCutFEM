@@ -4,9 +4,9 @@ in an axisymmetrical system such as a tokamak. """
 import numpy as np
 import matplotlib.pyplot as plt
 from random import random
+from scipy.interpolate import griddata
 from GaussQuadrature import *
 from ShapeFunctions import *
-from PlasmaCurrent import *
 from ElementObject import *
 
 class Equili:
@@ -16,24 +16,27 @@ class Equili:
     mu0 = 12.566370E-7           # H m-1    Magnetic permeability
     K = 1.602E-19               # J eV-1   Botlzmann constant
 
-    def __init__(self,folder_loc,ElementType,ElementOrder,Rmax,Rmin,epsilon,kappa,delta):
+    def __init__(self,folder_loc,ElementType,ElementOrder,CASE):
         self.directory = folder_loc
         self.case = folder_loc[folder_loc.rfind("/")+1:]
         
         # DECLARE ATTRIBUTES
-        self.ElType = ElementType
-        self.ElOrder = ElementOrder
-        self.epsilon = epsilon
-        self.kappa = kappa
-        self.delta = delta
-        self.Rmax = Rmax
-        self.Rmin = Rmin
-        self.R0 = (Rmax+Rmin)/2
-        self.QuadratureOrder = 2
-        self.TOL_inner = 1e-3
-        self.TOL_outer = 1e-3
-        self.itmax = 5
-        self.beta = 1e5  # NITSCHE'S METHOD PENALTY TERM
+        self.ElType = ElementType           # TYPE OF ELEMENTS CONSTITUTING THE MESH: 1: TRIANGLES,  2: QUADRILATERALS
+        self.ElOrder = ElementOrder         # ORDER OF MESH ELEMENTS: 1: LINEAR,   2: QUADRATIC
+        self.epsilon = None                 # PLASMA REGION ASPECT RATIO
+        self.kappa = None                   # PLASMA REGION ELONGATION
+        self.delta = None                   # PLASMA REGION TRIANGULARITY
+        self.Rmax = None                    # PLASMA REGION MAJOR RADIUS
+        self.Rmin = None                    # PLASMA REGION MINOR RADIUS
+        self.R0 = None                      # PLASMA REGION MEAN RADIUS
+        self.QuadratureOrder = 2            # NUMERICAL INTEGRATION QUADRATURE ORDER 
+        self.TOL_inner = 1e-3               # INNER LOOP STRUCTURE CONVERGENCE TOLERANCE
+        self.TOL_outer = 1e-3               # OUTER LOOP STRUCTURE CONVERGENCE TOLERANCE
+        self.it = 0                         # ITERATIONS COUNTER
+        self.itmax = 5                      # LOOP STRUCTURES MAXIMUM ITERATIONS NUMBER
+        self.beta = 1e8                     # NITSCHE'S METHOD PENALTY TERM
+        self.CASE = CASE                    # CASE SOLUTION
+        self.coeffs = []                    # ANALYTICAL SOLUTION COEFFICIENTS
 
         return
     
@@ -106,7 +109,7 @@ class Equili:
     
     def ComputeLinearSolutionCoefficients(self):
         """ Computes the coeffients for the magnetic flux in the linear source term case, that is for 
-                    GRAD-SHAFRANOV EQ:  DELTA*(PHI) = R^2
+                    GRAD-SHAFRANOV EQ:  DELTA*(PHI) = R^2   (plasma current is linear such that Jphi = R/mu0)
             for which the exact solution is 
                     PHI = R^4/8 + D1 + D2*R^2 + D3*(R^4-4*R^2*Z^2)
                 This function returns coefficients D1, D2, D3
@@ -121,18 +124,177 @@ class Equili:
         b = -(1/8)*np.array([[(1+self.epsilon)**4], [(1-self.epsilon)**4], [(1-self.delta*self.epsilon)**4]])
         
         coeffs = np.linalg.solve(A,b)
-        return coeffs 
+        return coeffs.T[0].tolist() 
+    
+    def AnalyticalSolution(self,X):
+        """ Function which computes the analytical solution (if it exists) at point with coordinates X. """
+        # DIMENSIONALESS COORDINATES
+        Xstar = X/self.R0
+        #Xstar = X
+        
+        if self.CASE == 'LINEAR':
+            if not self.coeffs: 
+                self.coeffs = self.ComputeLinearSolutionCoefficients()  # [D1, D2, D3]
+            PHIexact = (Xstar[0]**4)/8 + self.coeffs[0] + self.coeffs[1]*Xstar[0]**2 + self.coeffs[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2)
+            
+        elif self.CASE == 'NONLINEAR':
+            if not self.coeffs:
+                self.coeffs = [1.15*np.pi, 1.15, -0.5]  # [Kr, Kz, R0]
+            PHIexact = np.sin(self.coeffs[0]*(Xstar[0]+self.coeffs[2]))*np.cos(self.coeffs[1]*Xstar[1])
+            
+        return PHIexact
+    
+    def Jphi(self,R,Z,phi):
+        """ Function which computes the plasma current source term on the right hand side of the Grad-Shafranov equation. """
+        R = R/self.R0
+        Z = Z/self.R0
+        
+        if self.CASE == 'LINEAR':
+            # self.coeffs = [D1 D2 D3]  for linear solution
+            jphi = R/self.mu0
+            
+        if self.CASE == 'NONLINEAR': 
+            # self.coeffs = [Kr Kz R0]  for nonlinear solution
+            jphi = -((self.coeffs[0]**2+self.coeffs[1]**2)*phi+(self.coeffs[0]/R)*np.cos(self.coeffs[0]*(R+self.coeffs[2]))*np.cos(self.coeffs[1]*Z)
+            +R*((np.sin(self.coeffs[0]*(R+self.coeffs[2]))*np.cos(self.coeffs[1]*Z))**2-phi**2+np.exp(-np.sin(self.coeffs[0]*(R+self.coeffs[2]))*
+                                                                                            np.cos(self.coeffs[1]*Z))-np.exp(-phi)))/(self.mu0*R)
+        return jphi
+    
+    
+    def ComputeCriticalPHI(self,PHI):
+        """ Function which computes the values of PHI at the:
+                - MAGNETIC AXIS ->> PHI_0 
+                - SEPARATRIX (LAST CLOSED MAGNETIC SURFACE) / SADDLE POINT ->> PHI_X 
+        These values are used to NORMALISE PHI. 
+        
+        THE METHODOLOGY IS THE FOLLOWING:
+            1. OBTAIN CANDIDATE POINTS FOR SOLUTIONS OF EQUATION     NORM(GRAD(PHI))^2 = 0
+            2. USING A NEWTON METHOD (OR SOLVER), FIND SOLUTION OF    NORM(GRAD(PHI))^2 = 0
+            3. CHECK HESSIAN AT SOLUTIONS TO DIFFERENTIATE BETWEEN EXTREMUM AND SADDLE POINT
+            
+        THIS IS WHAT WE WOULD DO ANALYTICALLY. IN THE NUMERICAL CASE, WE DO:
+            1. INTERPOLATE PHI VALUES ON A FINER STRUCTURED MESH USING PHI ON NODES
+            2. COMPUTE GRAD(PHI) WITH FINER MESH VALUES USING FINITE DIFFERENCES
+            3. OBTAIN CANDIDATE POINTS ON FINER MESH FOR SOLUTIONS OF EQUATION     NORM(GRAD(PHI))^2 = 0
+            4. USING A SOLVER, FIND SOLUTION OF  NORM(GRAD(PHI))^2 = 0   BY EVALUATING AN INTERPOLATION OF GRAD(PHI)
+            5. CHECK HESSIAN AT SOLUTIONS
+            6. INTERPOLATE VALUE OF PHI AT CRITICAL POINT
+        """
+        
+        # 1. INTERPOLATE PHI VALUES ON A FINER STRUCTURED MESH USING PHI ON NODES
+        # DEFINE FINER STRUCTURED MESH
+        Mr = 60
+        Mz = 80
+        rfine = np.linspace(np.min(self.X[:,0]), np.max(self.X[:,0]), Mr)
+        zfine = np.linspace(np.min(self.X[:,1]), np.max(self.X[:,1]), Mz)
+        # INTERPOLATE PHI VALUES
+        Rfine, Zfine = np.meshgrid(rfine,zfine)
+        PHIfine = griddata((self.X[:,0],self.X[:,1]), PHI, (Rfine, Zfine), method='cubic')
+        
+        # 2. COMPUTE NORM(GRAD(PHI)) WITH FINER MESH VALUES USING FINITE DIFFERENCES
+        dr = (rfine[-1]-rfine[0])/Mr
+        dz = (zfine[-1]-zfine[0])/Mz
+        gradPHIfine = np.gradient(PHIfine,dr,dz)
+        NORMgradPHIfine = np.zeros(np.shape(gradPHIfine)[1:])
+        for i in range(Mr):
+            for j in range(Mz):
+                NORMgradPHIfine[j,i] = np.linalg.norm(np.array([gradPHIfine[0][j,i],gradPHIfine[1][j,i]])) 
+        
+        # 3. OBTAIN CANDIDATE POINTS ON FINER MESH FOR SOLUTIONS OF EQUATION     NORM(GRAD(PHI))^2 = 0
+        X0 = np.array([self.R0,0])
+        
+        # 4. USING A GRADIENT DESCENT, FIND SOLUTION OF  NORM(GRAD(PHI))^2 = 0   BY EVALUATING AN INTERPOLATION OF GRAD(PHI)
+        # INTERPOLATION OF GRAD(PHI)
+        def gradPHI(X,Rfine,Zfine,gradPHIfine):
+            dPHIdr = griddata((Rfine.flatten(),Zfine.flatten()), gradPHIfine[0].flatten(), (X[0],X[1]), method='cubic')
+            dPHIdz = griddata((Rfine.flatten(),Zfine.flatten()), gradPHIfine[1].flatten(), (X[0],X[1]), method='cubic')
+            GRAD = np.array([dPHIdr,dPHIdz])
+            return GRAD
+
+        # GRADIENT DESCENT ROUTINE
+        def gradient_descent(gradient, X0, alpha, itmax, tolerance, Rfine,Zfine,gradPHIfine):
+            Xk = np.zeros([itmax,2])
+            it = 0; TOL = 1
+            Xk[it,:] = X0
+            while TOL > tolerance and it < itmax:
+                dX = -alpha * gradient(Xk[it,:], Rfine,Zfine,gradPHIfine)
+                Xk[it+1,:] = Xk[it,:]+np.flip(dX)
+                TOL = np.linalg.norm(Xk[it+1,:]-Xk[it,:])
+                it += 1
+            return it, TOL, Xk[:it,:] 
+        
+        # FIND MINIMUM USING GRADIENT DESCENT
+        #alpha = 0.2
+        #itmax = 50; tolerance = 1e-3
+        #it, TOL, Xk = gradient_descent(gradPHI, X0, alpha, itmax, tolerance, Rfine,Zfine,gradPHIfine)
+        #Xcrit = Xk[-1,:]
+        
+        sol = optimize.root(gradPHI, X0, args=(Rfine,Zfine,gradPHIfine))
+        Xcrit = sol.x
+        
+        # 5. CHECK HESSIAN AT SOLUTIONS
+        def EvaluateHESSIAN(X,gradPHIfine,Rfine,Zfine,dr,dz):
+            # compute second derivatives on fine mesh
+            dgradPHIdrfine = np.gradient(gradPHIfine[0],dr,dz)
+            dgradPHIdzfine = np.gradient(gradPHIfine[1],dr,dz)
+            # interpolate HESSIAN components on point 
+            dPHIdrdr = griddata((Rfine.flatten(),Zfine.flatten()), dgradPHIdrfine[0].flatten(), (X[0],X[1]), method='cubic')
+            dPHIdzdr = griddata((Rfine.flatten(),Zfine.flatten()), dgradPHIdrfine[1].flatten(), (X[0],X[1]), method='cubic')
+            dPHIdzdz = griddata((Rfine.flatten(),Zfine.flatten()), dgradPHIdzfine[1].flatten(), (X[0],X[1]), method='cubic')
+            if dPHIdrdr*dPHIdzdz-dPHIdzdr**2 > 0:
+                return "LOCAL EXTREMUM"
+            else:
+                return "SADDLE POINT"
+            
+        nature = EvaluateHESSIAN(Xcrit, gradPHIfine, Rfine, Zfine, dr, dz)
+        
+        # 6. INTERPOLATE VALUE OF PHI AT CRITICAL POINT
+        def SearchElement(Elements,X,searchelements):
+            """ Function which finds the element among the elements list containing the point with coordinates X. """
+            for elem in searchelements:
+                Xe = Elements[elem].Xe
+                # Calculate the cross products (c1, c2, c3) for the point relative to each edge of the triangle
+                c1 = (Xe[1,0]-Xe[0,0])*(X[1]-Xe[0,1])-(Xe[1,1]-Xe[0,1])*(X[0]-Xe[0,0])
+                c2 = (Xe[2,0]-Xe[1,0])*(X[1]-Xe[1,1])-(Xe[2,1]-Xe[1,1])*(X[0]-Xe[1,0])
+                c3 = (Xe[0,0]-Xe[2,0])*(X[1]-Xe[2,1])-(Xe[0,1]-Xe[2,1])*(X[0]-Xe[2,0])
+                if (c1 < 0 and c2 < 0 and c3 < 0) or (c1 > 0 and c2 > 0 and c3 > 0): # INSIDE TRIANGLE
+                    break
+            return elem
+        
+        PHI_0 = 0
+        PHI_X = 0
+        if nature == "LOCAL EXTREMUM":
+            # FOR THE MAGNETIC AXIS VALUE PHI_0, THE LOCAL EXTREMUM SHOULD LIE INSIDE THE PLASMA REGION
+            elem = SearchElement(self.Elements,Xcrit,self.PlasmaElems)
+            PHI_0 = self.Elements[elem].ElementalInterpolation(Xcrit,PHI[self.Elements[elem].Te])
+        else:
+            elem = SearchElement(self.Elements,Xcrit,self.VacuumElems)
+            PHI_X = self.Elements[elem].ElementalInterpolation(Xcrit,PHI[self.Elements[elem].Te])
+
+        return PHI_0, PHI_X
+    
+    
+    def NormalisePHI(self,PHI):
+        
+        PHI_0, PHI_X = self.ComputeCriticalPHI(PHI)
+        
+        PHIbar = np.zeros([self.Nn])
+        for i in range(self.Nn):
+            PHIbar[i] = (PHI[i]-PHI_X)/np.abs(PHI_0-PHI_X)
+        
+        return PHIbar
+    
     
     def InitialGuess(self):
-        """ Use the analytical solution for the LINEAR case as initial guess. The plasma region is characterised by a negative phi in this solution. """
-        # ADIMENSIONALISE MESH
-        Xstar = self.X/self.R0
-        phi0 = np.zeros([self.Nn])
-        self.coeffs = self.ComputeLinearSolutionCoefficients()
+        """ This function computes the problem's initial guess. 
+                - PHI0: initial guess values  
+                """
+        PHI0 = np.zeros([self.Nn])
         for i in range(self.Nn):
-            phi0[i] = Xstar[i,0]**4/8 + self.coeffs[0] + self.coeffs[1]*Xstar[i,0]**2 + self.coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
-            phi0[i] *= 2*random()
-        return phi0
+            PHIexact = self.AnalyticalSolution(self.X[i,:])
+            PHI0[i] = PHIexact*2*random()
+            
+        return PHI0
     
     
     def InitialLevelSet(self):
@@ -140,9 +302,9 @@ class Equili:
         # ADIMENSIONALISE MESH
         Xstar = self.X/self.R0
         LS0 = np.zeros([self.Nn])
-        self.coeffs = self.ComputeLinearSolutionCoefficients()
+        coeffs = self.ComputeLinearSolutionCoefficients()
         for i in range(self.Nn):
-            LS0[i] = Xstar[i,0]**4/8 + self.coeffs[0] + self.coeffs[1]*Xstar[i,0]**2 + self.coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
+            LS0[i] = Xstar[i,0]**4/8 + coeffs[0] + coeffs[1]*Xstar[i,0]**2 + coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
         return LS0
     
     
@@ -194,11 +356,12 @@ class Equili:
         return
     
     def InitialiseVariables(self):
+        self.PHI = np.zeros([self.Nn,self.itmax*self.itmax])  # All computed solutions matrix  
         self.PHI_inner0 = np.zeros([self.Nn])      # solution at inner iteration n
         self.PHI_inner1 = np.zeros([self.Nn])      # solution at inner iteration n+1
         self.PHI_outer0 = np.zeros([self.Nn])      # solution at outer iteration n
         self.PHI_outer1 = np.zeros([self.Nn])      # solution at outer iteration n+1
-        self.PHI_converged = np.zeros([self.Nn])   # solution at outer iteration n+1
+        self.PHI_converged = np.zeros([self.Nn])   # converged solution 
         return
     
     def ComputeIntegrationQuadratures(self):
@@ -248,14 +411,9 @@ class Equili:
                 # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
                 PHIg = ELEMENT.N @ ELEMENT.PHIe
                 for ig in range(self.Elements[elem].Ng2D):
-                    SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*Jphi(self.mu0,ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig]) 
+                    SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig]) 
             # COMPUTE ELEMENTAL MATRICES
-            LHSe, RHSe = ELEMENT.IntegrateElementalDomainMatrices(SourceTermg)
-            # ASSEMBLE INTO GLOBAL SYSTEM
-            for i in range(ELEMENT.n):
-                for j in range(ELEMENT.n):
-                    self.LHS[ELEMENT.Te[i],ELEMENT.Te[j]] = LHSe[i,j]
-                self.RHS[ELEMENT.Te[i]] = RHSe[i]
+            ELEMENT.IntegrateElementalDomainTerms(SourceTermg,self.LHS,self.RHS)
                 
         print("Done!")
         
@@ -276,47 +434,35 @@ class Equili:
                     # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
                     PHIg = SUBELEM.N @ ELEMENT.PHIe
                     for ig in range(SUBELEM.Ng2D):
-                        SourceTermg[ig] = self.mu0*SUBELEM.Xg2D[ig,0]*Jphi(self.mu0,SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])
+                        SourceTermg[ig] = self.mu0*SUBELEM.Xg2D[ig,0]*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])
                 
                 # COMPUTE ELEMENTAL MATRICES
-                LHSe, RHSe = SUBELEM.IntegrateElementalDomainMatrices(SourceTermg)
-                # ASSEMBLE INTO GLOBAL SYSTEM
-                for i in range(SUBELEM.n):
-                    for j in range(SUBELEM.n):
-                        self.LHS[SUBELEM.Te[i],SUBELEM.Te[j]] = LHSe[i,j]
-                    self.RHS[SUBELEM.Te[i]] = RHSe[i]    
+                SUBELEM.IntegrateElementalDomainTerms(SourceTermg,self.LHS,self.RHS)
                      
             ####### COMPUTE INTERFACE TERMS
             # COMPUTE INTERFACE CONDITIONS PHI_D
-            PHI_Dg = np.zeros([ELEMENT.Ng1D])
+            ELEMENT.PHI_Dg = np.zeros([ELEMENT.Ng1D])
             for ig in range(ELEMENT.Ng1D):
-                PHI_Dg[ig] = self.BoundaryCondition(ELEMENT.Xgint[ig,:])
+                ELEMENT.PHI_Dg[ig] = self.AnalyticalSolution(ELEMENT.Xgint[ig,:])
                 
             # COMPUTE ELEMENTAL MATRICES
-            LHSe, RHSe = ELEMENT.IntegrateElementalInterfaceMatrices(PHI_Dg,self.beta)
-            # ASSEMBLE INTO GLOBAL SYSTEM
-            for i in range(ELEMENT.n):
-                for j in range(ELEMENT.n):
-                    self.LHS[ELEMENT.Te[i],ELEMENT.Te[j]] = LHSe[i,j]
-                self.RHS[ELEMENT.Te[i]] = RHSe[i]
+            ELEMENT.IntegrateElementalInterfaceTerms(ELEMENT.PHI_Dg,self.beta,self.LHS,self.RHS)
             
-        print("Done!")
-        
-        return
-    
-    
-    def BoundaryCondition(self, x):
-        
-        # ADIMENSIONALISE 
-        xstar = x/self.R0
-        phiD = xstar[0]**4/8 + self.coeffs[0] + self.coeffs[1]*xstar[0]**2 + self.coeffs[2]*(xstar[0]**4-4*xstar[0]**2*xstar[1]**2)
-        
-        return phiD
-    
+        print("Done!") 
+        return 
     
     def SolveSystem(self):
         
+        # SOLVE LINEAR SYSTEM OF EQUATIONS AND OBTAIN PHI
         self.PHI_inner1 = np.linalg.solve(self.LHS, self.RHS)
+        
+        # NORMALISE PHI ACCORDING TO OBTAINED PHI_0 AND PHI_X
+        PHIbar = self.NormalisePHI(self.PHI_inner1[:,0])
+        self.PHI_inner1 = np.zeros([self.Nn,1])
+        for node in range(self.Nn):
+            self.PHI_inner1[node] = PHIbar[node]
+            
+        self.PHI[:,self.it] = self.PHI_inner1[:,0]
         
         return
     
@@ -343,6 +489,7 @@ class Equili:
                 L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)
             if L2residu < self.TOL_outer:
                 self.marker_outer = False   # STOP WHILE LOOP 
+                self.PHI = self.PHI[:,:self.it+1]
                 self.PHI_converged = self.PHI_outer1
             else:
                 self.marker_outer = True
@@ -364,6 +511,7 @@ class Equili:
         print("COMPUTE INITIAL GUESS...", end="")
         self.PHI_inner0 = self.InitialGuess()
         self.PHI_outer0 = self.PHI_inner0
+        self.PHI[:,0] = self.PHI_inner0
         print('Done!')
         
         # INITIALISE LEVEL-SET FUNCTION
@@ -402,38 +550,42 @@ class Equili:
         print('START ITERATION...')
         self.marker_outer = True
         self.it_outer = 0
+        self.it = 0
         while (self.marker_outer == True and self.it_outer < self.itmax):
             self.it_outer += 1
             self.marker_inner = True
             self.it_inner = 0
             while (self.marker_inner == True and self.it_inner < self.itmax):
                 self.it_inner += 1
+                self.it += 1
+                print('OUTER ITERATION = '+str(self.it_outer)+' , INNER ITERATION = '+str(self.it_inner))
                 self.AssembleGlobalSystem()
                 #self.ApplyBoundaryConditions()
                 self.SolveSystem()
-                print('OUTER ITERATION = '+str(self.it_outer)+' , INNER ITERATION = '+str(self.it_inner))
                 self.UpdateElementalPHI()
                 self.PlotSolution(self.PHI_inner1)
-                
                 self.CheckConvergence("INNER")
                 
-                
             self.CheckConvergence("OUTER")
+        
+        self.PlotSolution(self.PHI_converged,colorbar=True)
             
         return
     
-    def PlotSolution(self,phi):
+    def PlotSolution(self,phi,colorbar=False):
         if len(np.shape(phi)) == 2:
             phi = phi[:,0]
         plt.figure(figsize=(7,10))
         plt.ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
         plt.xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
         plt.tricontourf(self.X[:,0],self.X[:,1], phi, levels=30)
-        plt.tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors='k')
-        #plt.colorbar()
-
+        if colorbar == False:
+            plt.tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors='k')
+        else:
+            plt.colorbar()
         plt.show()
         return
+    
     
     def PlotMesh(self):
         Tmesh = self.T + 1
@@ -504,4 +656,47 @@ class Equili:
                 
         axs[1].set_aspect('equal')
         plt.show()
+        return
+    
+    def PlotInterfaceValues(self):
+        import matplotlib as mpl
+
+        # COLLECT DATA
+        Ng1D = self.Elements[0].Ng1D
+        X = np.zeros([len(self.InterElems)*Ng1D,self.dim])
+        PHID = np.zeros([len(self.InterElems)*Ng1D])
+        for i, elem in enumerate(self.InterElems):
+            X[Ng1D*i:Ng1D*(i+1),:] = self.Elements[elem].Xgint
+            PHID[Ng1D*i:Ng1D*(i+1)] = self.Elements[elem].PHI_Dg
+
+        fig, ax = plt.subplots(figsize=(7,10))
+        ax.set_ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
+        ax.set_xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
+        cmap = plt.get_cmap('jet')
+        norm = plt.Normalize(PHID.min(),PHID.max())
+        linecolors = cmap(norm(PHID))
+        ax.scatter(X[:,0],X[:,1],color = linecolors)
+        fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap),ax=ax)
+        plt.show()
+        
+        return
+    
+    def PlotError(self,phi):
+        if len(np.shape(phi)) == 2:
+            phi = phi[:,0]
+            
+        error = np.zeros([self.Nn])
+        for i in range(self.Nn):
+            PHIexact = self.AnalyticalSolution(self.X[i,:])
+            error[i] = np.abs(PHIexact-phi[i])
+            
+        plt.figure(figsize=(7,10))
+        plt.ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
+        plt.xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
+        plt.tricontourf(self.X[:,0],self.X[:,1], error, levels=30)
+        #plt.tricontour(self.X[:,0],self.X[:,1], PHIexact, levels=[0], colors='k')
+        plt.colorbar()
+
+        plt.show()
+        
         return

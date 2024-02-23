@@ -95,6 +95,14 @@ class Element:
         Xi = sol.x
         return Xi
     
+    def ElementalInterpolation(self,X,Fe):
+        """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
+        F = 0
+        for i in range(self.n):
+            N = ShapeFunctionsPhysical(X, self.Xe, self.ElType, self.ElOrder, i+1)
+            F += N*Fe[i]
+        return F
+    
     
     def InterfaceLinearApproximation(self):
         """ Function computing the intersection points between the element edges and the interface (for elements containing the interface) 
@@ -125,38 +133,66 @@ class Element:
             LSe = LSe[pos]
 
         # NOW, THE FIRST ROW IN Xe AND FIRST ELEMENT IN LSe CORRESPONDS TO THE NODE ALONE IN ITS RESPECTIVE REGION (INSIDE OR OUTSIDE PLASMA REGION)
-
-        # WE DEFINE NOW THE DIFFERENT FUNCTION WE NEED IN ORDER TO BUILD THE TRANSCENDENTAL EQUATION CHARACTERISING THE INTERSECTION BETWEEN
-        # THE ELEMENT'S EDGE AND THE LEVEL-SET 0-CONTOUR
-        def z(r,Xe,edge):
-            # FUNCTION DESCRIBING THE RESTRICCION ASSOCIATED TO THE ELEMENT EDGE
-            z = ((Xe[edge,1]-Xe[0,1])*r+Xe[0,1]*Xe[edge,0]-Xe[edge,1]*Xe[0,0])/(Xe[edge,0]-Xe[0,0])
-            return z
-
-        def fun(r,Xe,LSe,edge):
-            def N0(r,z,Xe):
-                # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE WHICH IS "ALONE" IN RESPECTIVE REGION (OUTSIDE OR INSIDE PLASMA REGION)
-                j = 1
-                k = 2
-                N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
-                return N
-            def Nedge(r,z,Xe,edge):
-                # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE ALONG THE EDGE FOR WHICH FIND THE INTERSECTION WITH LEVEL-SET 0-CONTOUR
-                j = (edge+1)%3
-                k = (edge+2)%3
-                N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
-                return N
-            
-            # TRANSCENDENTAL EQUATION TO SOLVE
-            f = N0(r,z(r,Xe,edge),Xe)*LSe[0] + Nedge(r,z(r,Xe,edge),Xe,edge)*LSe[edge]
-            return f
-
-        # SOLVE TRANSCENDENTAL EQUATION FOR BOTH EDGES AND OBTAIN INTERSECTION COORDINATES
+        
+        # OBTAIN INTERSECTION COORDINATES FOR EACH EDGE:
         self.Xeint = np.zeros([2,2])
         for i, edge in enumerate([1,2]):
-            sol = optimize.root(fun, Xe[0,0], args=(Xe,LSe,edge))
-            self.Xeint[i,:] = [sol.x, z(sol.x,Xe,edge)]
             
+            if np.abs(Xe[edge,0]-Xe[0,0]) > 1e-8:  # EDGE IS NOT VERTICAL
+                # WE DEFINE NOW THE DIFFERENT FUNCTION WE NEED IN ORDER TO BUILD THE TRANSCENDENTAL EQUATION CHARACTERISING THE INTERSECTION BETWEEN
+                # THE ELEMENT'S EDGE AND THE LEVEL-SET 0-CONTOUR
+                def z(r,Xe,edge):
+                    # FUNCTION DESCRIBING THE RESTRICCION ASSOCIATED TO THE ELEMENT EDGE
+                    z = ((Xe[edge,1]-Xe[0,1])*r+Xe[0,1]*Xe[edge,0]-Xe[edge,1]*Xe[0,0])/(Xe[edge,0]-Xe[0,0])
+                    return z  
+
+                def fun(r,Xe,LSe,edge):
+                    def N0(r,z,Xe):
+                        # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE WHICH IS "ALONE" IN RESPECTIVE REGION (OUTSIDE OR INSIDE PLASMA REGION)
+                        j = 1
+                        k = 2
+                        N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
+                        return N
+                    def Nedge(r,z,Xe,edge):
+                        # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE ALONG THE EDGE FOR WHICH FIND THE INTERSECTION WITH LEVEL-SET 0-CONTOUR
+                        j = (edge+1)%3
+                        k = (edge+2)%3
+                        N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
+                        return N
+                    
+                    # TRANSCENDENTAL EQUATION TO SOLVE
+                    f = N0(r,z(r,Xe,edge),Xe)*LSe[0] + Nedge(r,z(r,Xe,edge),Xe,edge)*LSe[edge]
+                    return f
+
+                # SOLVE TRANSCENDENTAL EQUATION AND COMPUTE INTERSECTION COORDINATES
+                sol = optimize.root(fun, Xe[0,0], args=(Xe,LSe,edge))
+                self.Xeint[i,:] = [sol.x, z(sol.x,Xe,edge)]
+                
+            else:  # IF THE ELEMENT'S EDGE IS VERTICAL
+                r = Xe[0,0] 
+                
+                def fun(z,r,Xe,LSe,edge):
+                    def N0(r,z,Xe):
+                        # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE WHICH IS "ALONE" IN RESPECTIVE REGION (OUTSIDE OR INSIDE PLASMA REGION)
+                        j = 1
+                        k = 2
+                        N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
+                        return N
+                    def Nedge(r,z,Xe,edge):
+                        # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE ALONG THE EDGE FOR WHICH FIND THE INTERSECTION WITH LEVEL-SET 0-CONTOUR
+                        j = (edge+1)%3
+                        k = (edge+2)%3
+                        N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
+                        return N
+                    
+                    # TRANSCENDENTAL EQUATION TO SOLVE
+                    f = N0(r,z,Xe)*LSe[0] + Nedge(r,z,Xe,edge)*LSe[edge]
+                    return f
+                
+                # SOLVE TRANSCENDENTAL EQUATION AND COMPUTE INTERSECTION COORDINATES
+                sol = optimize.root(fun, Xe[0,1], args=(r,Xe,LSe,edge))
+                self.Xeint[i,:] = [r, sol.x]
+                
         self.Xemod = np.concatenate((Xe,self.Xeint), axis = 0)
         self.permu = pos
         
@@ -174,10 +210,11 @@ class Element:
                 if abs(Xe[i,0]-x[0]) < TOL:
                     edgecheck = True
                     break
-            y = lambda x : ((Xe[j,1]-Xe[i,1])*x+Xe[i,1]*Xe[j,0]-Xe[j,1]*Xe[i,0])/(Xe[j,0]-Xe[i,0])  # function representing the restriction on the edge
-            if abs(y(x[0])-x[1]) < TOL:
-                edgecheck = True
-                break
+            else:
+                y = lambda x : ((Xe[j,1]-Xe[i,1])*x+Xe[i,1]*Xe[j,0]-Xe[j,1]*Xe[i,0])/(Xe[j,0]-Xe[i,0])  # function representing the restriction on the edge
+                if abs(y(x[0])-x[1]) < TOL:
+                    edgecheck = True
+                    break
         if edgecheck == True:
             return i, j
         else:
@@ -187,9 +224,10 @@ class Element:
     @staticmethod
     def Tessellation(Mode,**kwargs):
         """ This function performs the TESSELLATION of an element with nodal coordinates Xe and interface coordinates Xeint (intersection with edges) 
-        Input: - Mode: for Mode=0 we pass the input (Xe,Xeint); for Mode=1 we pass input (Xemod) 
+        Input: - Mode: for Mode="REFERENCE" we pass the input (Xe,Xeint,shortedge); for Mode="PHYSICAL" we pass input (Xemod) 
                - Xe: element nodal coordinates 
                - Xeint: coordinates of intersection points between interface and edges 
+               - shortedge: edge for which the distance between common node and interface intersection is shortest IN THE PHYSICAL ELEMENT 
                - Xemod: modified nodal coordinate matrix, where the first row is the common node to both edge intersecting the interface
         Output: - TeTESS: Tessellation connectivity matrix such that 
                         TeTESS = [[Connectivities for subelement 1]
@@ -207,9 +245,30 @@ class Element:
         # IF INPUT Xemod IS PROVIDED, THE TESSELLATION IS DONE ACCORDINGLY TO MODIFIED NODAL MATRIX Xemod WHICH IS ASSUMED TO HAS THE PREVIOUSLY DESCRIBED STRUCTURE.
         # IF NOT, THE COMMON NODE IS DETERMINED (THIS IS THE CASE FOR INSTANCE WHEN THE REFERENCE ELEMENT IS TESSELLATED).
                 
-        if Mode == 1:
+        if Mode == "PHYSICAL":
             XeTESS = kwargs['Xemod']
-        elif Mode == 0:
+            # ONCE THE NODAL MATRIX IS ORGANISED, THE CONNECTIVITIES ARE TRIVIAL AND CAN BE HARD-CODED 
+            TeTESS = np.zeros([3, 3], dtype = int)  # connectivities for 3 subtriangles
+            TeTESS[0,:] = [0, 3, 4]  # first triangular subdomain is common node and intersection nodes
+
+            # COMPARE DISTANCE INTERFACE-(EDGE NODE)
+            edge = 1
+            distance1 = np.linalg.norm(XeTESS[edge,:]-XeTESS[edge+2,:])
+            edge = 2
+            distance2 = np.linalg.norm(XeTESS[edge,:]-XeTESS[edge+2,:])
+
+            if distance1 <= distance2:
+                TeTESS[1,:] = [3, 1, 2]
+                TeTESS[2,:] = [3, 4, 2]
+                shortedge = 1
+            if distance1 > distance2:
+                TeTESS[1,:] = [4, 2, 1]
+                TeTESS[2,:] = [4, 3, 1]
+                shortedge = 2
+                
+            return TeTESS, shortedge
+                
+        elif Mode == "REFERENCE":
             Xe = kwargs['Xe']
             Xeint = kwargs['Xeint']
             Nint = np.shape(Xeint)[0]  # number of intersection points
@@ -227,26 +286,17 @@ class Element:
             # MODIFIED NODAL MATRIX AND CONECTIVITIES, ACCOUNTING FOR 3 SUBTRIANGLES 
             XeTESS = np.concatenate((Xe, Xeint), axis=0)
             
-        # ONCE THE NODAL MATRIX IS ORGANISED, THE CONNECTIVITIES ARE TRIVIAL AND CAN BE HARD-CODED 
-        TeTESS = np.zeros([3, 3], dtype = int)  # connectivities for 3 subtriangles
-        TeTESS[0,:] = [0, 3, 4]  # first triangular subdomain is common node and intersection nodes
+            # ONCE THE NODAL MATRIX IS ORGANISED, THE CONNECTIVITIES ARE TRIVIAL AND CAN BE HARD-CODED 
+            TeTESS = np.zeros([3, 3], dtype = int)  # connectivities for 3 subtriangles
+            TeTESS[0,:] = [0, 3, 4]  # first triangular subdomain is common node and intersection nodes
 
-        # COMPARE DISTANCE INTERFACE-(EDGE NODE)
-        edge = 1
-        distance1 = np.linalg.norm(XeTESS[edge,:]-XeTESS[edge+2,:])
-        edge = 2
-        distance2 = np.linalg.norm(XeTESS[edge,:]-XeTESS[edge+2,:])
-
-        if distance1 <= distance2:
-            TeTESS[1,:] = [3, 1, 2]
-            TeTESS[2,:] = [3, 4, 2]
-        if distance1 > distance2:
-            TeTESS[1,:] = [4, 2, 1]
-            TeTESS[2,:] = [4, 3, 1]
-        
-        if Mode == 1:
-            return TeTESS
-        elif Mode == 0:
+            if kwargs["shortedge"] == 1:
+                TeTESS[1,:] = [3, 1, 2]
+                TeTESS[2,:] = [3, 4, 2]
+            if kwargs["shortedge"] == 2:
+                TeTESS[1,:] = [4, 2, 1]
+                TeTESS[2,:] = [4, 3, 1]
+                
             return XeTESS, TeTESS
         
         
@@ -353,7 +403,7 @@ class Element:
         
         ######## GENERATE SUBELEMTAL STRUCTURE
         # I. PERFORM TESSELLATION ON PHYSICAL ELEMENT AND GENERATE SUBELEMENTS
-        self.Temod = self.Tessellation(Mode=1,Xemod=self.Xemod)
+        self.Temod, self.shortedge = self.Tessellation(Mode="PHYSICAL",Xemod=self.Xemod)
         self.Nsub = np.shape(self.Temod)[0]
         self.SubElements = [Element(index = subelem, ElType = self.ElType, ElOrder = self.ElOrder,
                                     Xe = self.Xemod[self.Temod[subelem,:]],
@@ -375,7 +425,7 @@ class Element:
             
         # 2. DO TESSELLATION ON REFERENCE ELEMENT
         XIe = np.array([[1,0], [0,1], [0,0]])
-        XIemod, TemodREF = self.Tessellation(Mode=0,Xe=XIe,Xeint=XIeint)
+        XIemod, TemodREF = self.Tessellation(Mode="REFERENCE",Xe=XIe,Xeint=XIeint,shortedge=self.shortedge)
         
         # 3. MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS AND EVALUATE INTEGRATION ENTITIES ON THEM
         for i, subelem in enumerate(self.SubElements):
@@ -444,14 +494,12 @@ class Element:
         return 
     
     
-    def IntegrateElementalDomainMatrices(self,SourceTermg):
+    def IntegrateElementalDomainTerms(self,SourceTermg,LHS,RHS):
         """ Input: - SourceTermg: source term (plasma current) evaluated at physical gauss integration nodes
-            Output: - LHSe: elemental system Left-Hand-Side matrix 
-                    - RHSe: elemental system Reft-Hand-Side vector
+                   - LHS: global system Left-Hand-Side matrix 
+                   - RHS: global system Reft-Hand-Side vector
                     """
-        LHSe = np.zeros([self.n,self.n])
-        RHSe = np.zeros([self.n,1])
-                    
+        
         # LOOP OVER GAUSS INTEGRATION NODES
         for ig in range(self.Ng2D):  
             # SHAPE FUNCTIONS GRADIENT
@@ -461,23 +509,20 @@ class Element:
                 for j in range(self.n):   # COLUMNS ELEMENTAL MATRIX
                     # COMPUTE LHS MATRIX TERMS
                     ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
-                    LHSe[i,j] -= np.transpose((self.invJg[ig,:,:]@Ngrad[:,i]))@(self.invJg[ig,:,:]@Ngrad[:,j])*self.detJg[ig]*self.Wg2D[ig]
+                    LHS[self.Te[i],self.Te[j]] -= np.transpose((self.invJg[ig,:,:]@Ngrad[:,i]))@(self.invJg[ig,:,:]@Ngrad[:,j])*self.detJg[ig]*self.Wg2D[ig]
                     ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                    LHSe[i,j] -= (1/self.Xg2D[ig,0])*self.N[ig,j] * (self.invJg[ig,0,:]@Ngrad[:,i])*self.detJg[ig]*self.Wg2D[ig]
+                    LHS[self.Te[i],self.Te[j]] -= (1/self.Xg2D[ig,0])*self.N[ig,j] * (self.invJg[ig,0,:]@Ngrad[:,i])*self.detJg[ig]*self.Wg2D[ig]
                 # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
-                RHSe[i] += SourceTermg[ig] * self.N[ig,i] *self.detJg[ig]*self.Wg2D[ig]
-        return LHSe, RHSe
+                RHS[self.Te[i]] += SourceTermg[ig] * self.N[ig,i] *self.detJg[ig]*self.Wg2D[ig]
+        return 
     
     
-    def IntegrateElementalInterfaceMatrices(self,PHI_Dg,beta):
+    def IntegrateElementalInterfaceTerms(self,PHI_Dg,beta,LHS,RHS):
         """ Input: - PHI_Dg: Interface condition, evaluated at physical gauss integration nodes
                    - beta: Nitsche's method penalty parameter
-            Output: - LHSe: elemental system Left-Hand-Side matrix 
-                    - RHSe: elemental system Reft-Hand-Side vector 
+                   - LHS: global system Left-Hand-Side matrix 
+                   - RHS: global system Reft-Hand-Side vector 
                     """
-    
-        LHSe = np.zeros([self.n,self.n])
-        RHSe = np.zeros([self.n,1])
     
         # LOOP OVER GAUSS INTEGRATION NODES
         for ig in range(self.Ng1D):  
@@ -488,17 +533,17 @@ class Element:
                 for j in range(self.n):  # COLUMNS ELEMENTAL MATRIX
                     # COMPUTE LHS MATRIX TERMS
                     ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
-                    LHSe[i,j] += self.Nint[ig,i] * self.NormalVec @ Ngrad[:,j] * self.detJgint[ig] * self.Wg1D[ig]
+                    LHS[self.Te[i],self.Te[j]] += self.Nint[ig,i] * self.NormalVec @ Ngrad[:,j] * self.detJgint[ig] * self.Wg1D[ig]
                     ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
-                    LHSe[i,j] += self.NormalVec @ Ngrad[:,i]*(self.Nint[ig,j] * self.detJgint[ig] * self.Wg1D[ig])
+                    LHS[self.Te[i],self.Te[j]] += self.NormalVec @ Ngrad[:,i]*(self.Nint[ig,j] * self.detJgint[ig] * self.Wg1D[ig])
                     ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
-                    LHSe[i,j] += beta * self.Nint[ig,i] * self.Nint[ig,j] * self.detJgint[ig] * self.Wg1D[ig]
+                    LHS[self.Te[i],self.Te[j]] += beta * self.Nint[ig,i] * self.Nint[ig,j] * self.detJgint[ig] * self.Wg1D[ig]
                 # COMPUTE RHS VECTOR TERMS 
                 ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
-                RHSe[i] +=  PHI_Dg[ig] * self.NormalVec @ Ngrad[:,i] * self.detJgint[ig] * self.Wg1D[ig]
+                RHS[self.Te[i]] +=  PHI_Dg[ig] * self.NormalVec @ Ngrad[:,i] * self.detJgint[ig] * self.Wg1D[ig]
                 ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
-                RHSe[i] +=  beta * PHI_Dg[ig] * self.Nint[ig,i] * self.detJgint[ig] * self.Wg1D[ig]
-        return LHSe, RHSe
+                RHS[self.Te[i]] +=  beta * PHI_Dg[ig] * self.Nint[ig,i] * self.detJgint[ig] * self.Wg1D[ig]
+        return 
         
     
 def ElementalNumberOfNodes(elemType, elemOrder):
