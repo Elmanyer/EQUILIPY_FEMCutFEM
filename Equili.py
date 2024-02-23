@@ -33,7 +33,7 @@ class Equili:
         self.TOL_inner = 1e-3
         self.TOL_outer = 1e-3
         self.itmax = 5
-        self.beta = 1e3  # NITSCHE'S METHOD PENALTY TERM
+        self.beta = 1e5  # NITSCHE'S METHOD PENALTY TERM
 
         return
     
@@ -135,6 +135,17 @@ class Equili:
         return phi0
     
     
+    def InitialLevelSet(self):
+        """ Use the analytical solution for the LINEAR case as initial Level-Set function. The plasma region is characterised by a negative value of Level-Set. """
+        # ADIMENSIONALISE MESH
+        Xstar = self.X/self.R0
+        LS0 = np.zeros([self.Nn])
+        self.coeffs = self.ComputeLinearSolutionCoefficients()
+        for i in range(self.Nn):
+            LS0[i] = Xstar[i,0]**4/8 + self.coeffs[0] + self.coeffs[1]*Xstar[i,0]**2 + self.coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
+        return LS0
+    
+    
     def ClassifyElements(self):
         """ Function that sperates the elements into 3 groups: 
                 - PlasmaElems: elements inside the plasma region P(phi) where the plasma current is different from 0
@@ -182,11 +193,178 @@ class Equili:
             self.Elements[elem].interface = inter
         return
     
+    def InitialiseVariables(self):
+        self.PHI_inner0 = np.zeros([self.Nn])      # solution at inner iteration n
+        self.PHI_inner1 = np.zeros([self.Nn])      # solution at inner iteration n+1
+        self.PHI_outer0 = np.zeros([self.Nn])      # solution at outer iteration n
+        self.PHI_outer1 = np.zeros([self.Nn])      # solution at outer iteration n+1
+        self.PHI_converged = np.zeros([self.Nn])   # solution at outer iteration n+1
+        return
+    
+    def ComputeIntegrationQuadratures(self):
+        # COMPUTE STANDARD QUADRATURE VALUES FOR ALL MESH ELEMENTS 
+        for Element in self.Elements:
+            Element.ComputeStandardQuadratures(self.QuadratureOrder)
+            
+        # COMPUTE MODIFIED QUADRATURE VALUES FOR INTERFACE ELEMENTS
+        for elem in self.InterElems:
+            self.Elements[elem].ComputeModifiedQuadratures()
+        return
+    
+    def ComputeInterfaceNormals(self):
+        for elem in self.InterElems:
+            self.Elements[elem].InterfaceNormal()
+        self.CheckNormalVectors()
+        return
+    
+    def CheckNormalVectors(self):
+        for elem in self.InterElems:
+            dir = np.array([self.Elements[elem].Xeint[1,0]-self.Elements[elem].Xeint[0,0], self.Elements[elem].Xeint[1,1]-self.Elements[elem].Xeint[0,1]]) 
+            scalarprod = np.dot(dir,self.Elements[elem].NormalVec)
+            if scalarprod > 1e-10: 
+                raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
+        return
+    
+    def IntegrateElementalDomainTerms(self,n,Te,ng,Wg,Xg,SourceTerm,invJg,detJg,N,dNdxi,dNdeta):
+        """ Input:
+                    - n: NUMBER OF NODES IN ELEMENT
+                    - Te: ELEMENTAL CONECTIVITIES
+                    """
+        # LOOP OVER GAUSS INTEGRATION NODES
+        for ig in range(ng):  
+            # SHAPE FUNCTIONS GRADIENT
+            print(dNdxi)
+            Ngrad = np.array([dNdxi[ig,:],dNdeta[ig,:]])
+            # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM 
+            for i in range(n):   # ROWS ELEMENTAL MATRIX
+                for j in range(n):   # COLUMNS ELEMENTAL MATRIX
+                    # COMPUTE LHS MATRIX TERMS
+                    ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
+                    self.LHS[Te[i],Te[j]] -= np.transpose((invJg[ig,:,:]@Ngrad[:,i]))@(invJg[ig,:,:]@Ngrad[:,j])*detJg[ig]*Wg[ig]
+                    ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
+                    self.LHS[Te[i],Te[j]] -= (1/Xg[ig,0])*N[ig,j] * (invJg[ig,0,:]@Ngrad[:,i])*detJg[ig]*Wg[ig]
+                # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
+                self.RHS[Te[i]] += SourceTerm[ig] * N[ig,i] *detJg[ig]*Wg[ig]
+        return
+    
+    def IntegrateInterfaceTerms(self,n,Te,ng,Wg,Xg,NormalVec,detJg,N,dNdxi,dNdeta):
+    
+        # LOOP OVER GAUSS INTEGRATION NODES
+        for ig in range(ng):  
+            
+            # SHAPE FUNCTIONS GRADIENT
+            Ngrad = np.array([dNdxi[ig,:],dNdeta[ig,:]])
+            # COMPUTE BOUNDARY CONDITION VALUES
+            PHId = self.BoundaryCondition(Xg)
+            
+            # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
+            for i in range(n):  # ROWS ELEMENTAL MATRIX
+                for j in range(n):  # COLUMNS ELEMENTAL MATRIX
+                    # COMPUTE LHS MATRIX TERMS
+                    ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
+                    self.LHS[Te[i],Te[j]] += N[ig,i] * NormalVec @ Ngrad[:,j] * detJg[ig] * Wg[ig]
+                    ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
+                    self.LHS[Te[i],Te[j]] += NormalVec @ Ngrad[:,i]*(N[ig,j] * detJg[ig] * Wg[ig])
+                    ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
+                    self.LHS[Te[i],Te[j]] += self.beta * N[ig,i] * N[ig,j] * detJg[ig] * Wg[ig]
+                # COMPUTE RHS VECTOR TERMS 
+                ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
+                self.RHS[Te[i]] +=  PHId * NormalVec @ Ngrad[:,i] * detJg[ig] * Wg[ig]
+                ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
+                self.RHS[Te[i]] +=  self.beta * N[ig,i] * PHId * detJg[ig] * Wg[ig]
+        return
     
     def AssembleGlobalSystem(self):
         """ This routine assembles the global matrices derived from the discretised linear system of equations used the common Galerkin approximation. 
         Nonetheless, due to the unfitted nature of the method employed, integration in cut cells (elements containing the interface between plasma region 
         and vacuum region, defined by the level-set 0-contour) must be treated accurately. """
+        
+        # INITIALISE GLOBAL SYSTEM MATRICES
+        self.LHS = np.zeros([self.Nn,self.Nn])
+        self.RHS = np.zeros([self.Nn, 1])
+        
+        # ELEMENTS INSIDE AND OUTSIDE PLASMA REGION (ELEMENTS WHICH ARE NOT CUT)
+        print("     Assemble non-cut elements...", end="")
+        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems), axis=0): 
+            #print(elem)  
+            
+            # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
+            source = np.zeros([self.Elements[elem].Ng2D])
+            if self.Elements[elem].Dom < 0:
+                # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
+                PHIg = self.Elements[elem].N @ self.Elements[elem].PHIe
+                for ig in range(self.Elements[elem].Ng2D):
+                    source[ig] = self.mu0*self.Elements[elem].Xg[ig,0]*Jphi(self.mu0,self.Elements[elem].Xg[ig,0],self.Elements[elem].Xg[ig,1],PHIg[ig]) 
+            
+            # LOOP OVER GAUSS INTEGRATION NODES
+            self.IntegrateElementalDomainTerms(n = self.Elements[elem].n,
+                                               Te = self.Elements[elem].Te,
+                                               ng = self.Elements[elem].Ng2D,
+                                               Wg = self.Elements[elem].Wg2D,
+                                               Xg = self.Elements[elem].Xg,
+                                               SourceTerm = source,
+                                               invJg = self.Elements[elem].invJg,
+                                               detJg = self.Elements[elem].detJg,
+                                               N = self.Elements[elem].N,
+                                               dNdxi = self.Elements[elem].dNdxi,
+                                               dNdeta = self.Elements[elem].dNdeta)
+        
+        print("Done!")
+        
+        print("     Assemble cut elements...", end="")
+        # INTERFACE ELEMENTS (CUT ELEMENTS)
+        for elem in self.InterElems:
+            #print(elem)
+            
+            # NOW, EACH INTERFACE ELEMENT IS DIVIDED INTO SUBELEMENTS ACCORDING TO THE POSITION OF THE APPROXIMATED INTERFACE ->> TESSELLATION
+            # ON EACH SUBELEMENT THE WEAK FORM IS INTEGRATED USING ADAPTED NUMERICAL INTEGRATION QUADRATURES
+            # LOOP OVER SUBELEMENTS 
+            for subelem in range(self.Elements[elem].Nsub):  
+                
+                # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
+                source = np.zeros([self.Elements[elem].Ng2D])
+                if self.Elements[elem].Dommod[subelem] < 0:
+                    # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
+                    PHIg = self.Elements[elem].Nmod[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:] @ self.Elements[elem].PHIe
+                    for ig in range(self.Elements[elem].Ng2D):
+                        source[ig] = self.mu0*self.Elements[elem].Xgmod[subelem*self.Elements[elem].Ng2D+ig,0]*Jphi(self.mu0,self.Elements[elem].Xgmod[subelem*self.Elements[elem].Ng2D+ig,0],
+                                                                                                                    self.Elements[elem].Xgmod[subelem*self.Elements[elem].Ng2D+ig,1],PHIg[ig])
+                
+                # LOOP OVER GAUSS INTEGRATION NODES
+                self.IntegrateElementalDomainTerms(n = self.Elements[elem].n,
+                                                Te = self.Elements[elem].Te,   ##!!!!
+                                                ng = self.Elements[elem].Ng2D,
+                                                Wg = self.Elements[elem].Wg2D,
+                                                Xg = self.Elements[elem].Xgmod[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:],
+                                                SourceTerm = source,
+                                                invJg = self.Elements[elem].invJgmod[subelem,:,:,:],
+                                                detJg = self.Elements[elem].detJgmod[subelem,:],
+                                                N = self.Elements[elem].Nmod[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:],
+                                                dNdxi = self.Elements[elem].dNdxi[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:],
+                                                dNdeta = self.Elements[elem].dNdeta[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:])
+                
+            # INTEGRATE OVER INTERFACE
+            self.IntegrateInterfaceTerms(n = self.Elements[elem].n,
+                                         Te = self.Elements[elem].Te,
+                                         ng = self.Elements[elem].Ng1D,
+                                         Wg = self.Elements[elem].Wg1D,
+                                         Xg = self.Elements[elem].Xgintmod,
+                                         NormalVec = self.Elements[elem].NormalVec,
+                                         detJg = self.Elements[elem].detJgintmod,
+                                         N = self.Elements[elem].Nintmod,
+                                         dNdxi = self.Elements[elem].dNdxiintmod,
+                                         dNdeta = self.Elements[elem].dNdetaintmod)
+            
+        print("Done!")
+        
+        return
+    
+    
+    
+    """def AssembleGlobalSystem(self):
+        "" This routine assembles the global matrices derived from the discretised linear system of equations used the common Galerkin approximation. 
+        Nonetheless, due to the unfitted nature of the method employed, integration in cut cells (elements containing the interface between plasma region 
+        and vacuum region, defined by the level-set 0-contour) must be treated accurately. ""
         
         # INITIALISE GLOBAL SYSTEM MATRICES
         self.LHS = np.zeros([self.Nn,self.Nn])
@@ -275,7 +453,7 @@ class Equili:
         print("Done!")
         
         return
-    
+    """
     
     def BoundaryCondition(self, x):
         
@@ -284,11 +462,12 @@ class Equili:
         phiD = xstar[0]**4/8 + self.coeffs[0] + self.coeffs[1]*xstar[0]**2 + self.coeffs[2]*(xstar[0]**4-4*xstar[0]**2*xstar[1]**2)
         
         return phiD
-
     
+
+    """
     def ApplyBoundaryConditions(self):
-        """ Function computing the boundary integral terms arising from Nitsche's method (weak imposition of BC) and assembling 
-        into the global system. Such terms only affect the elements containing the interface. """
+        "" Function computing the boundary integral terms arising from Nitsche's method (weak imposition of BC) and assembling 
+        into the global system. Such terms only affect the elements containing the interface. ""
         
         for elem in self.InterElems:
         
@@ -320,6 +499,7 @@ class Equili:
                     self.RHS[self.T[elem,i]] +=  self.beta * self.Elements[elem].Nintmod[ig,i] * PHId * detJ1D * self.Elements[elem].Wg1D[ig]
                 
         return
+    """
     
     def SolveSystem(self):
         
@@ -356,22 +536,9 @@ class Equili:
                 self.PHI_outer0 = self.PHI_outer1
         return 
     
-    def InitialiseVariables(self):
-        self.PHI_inner0 = np.zeros([self.Nn])      # solution at inner iteration n
-        self.PHI_inner1 = np.zeros([self.Nn])      # solution at inner iteration n+1
-        self.PHI_outer0 = np.zeros([self.Nn])      # solution at outer iteration n
-        self.PHI_outer1 = np.zeros([self.Nn])      # solution at outer iteration n+1
-        self.PHI_converged = np.zeros([self.Nn])   # solution at outer iteration n+1
-        return
-    
-    def ComputeIntegrationQuadratures(self):
-        for Element in self.Elements:
-            Element.ComputeModifiedQuadratures(self.QuadratureOrder)
-        return
-    
-    def ComputeInterfaceNormals(self):
-        for elem in self.InterElems:
-            self.Elements[elem].InterfaceNormal()
+    def UpdateElementalPHI(self):
+        for element in self.Elements:
+            element.PHIe = self.PHI_inner1[element.Te]
         return
 
     
@@ -388,7 +555,7 @@ class Equili:
         
         # INITIALISE LEVEL-SET FUNCTION
         print("INITIALISE LEVEL-SET...", end="")
-        self.LevelSet = self.PHI_inner0
+        self.LevelSet = self.InitialLevelSet()
         print('Done!')
         
         # INITIALISE ELEMENTS 
@@ -429,10 +596,10 @@ class Equili:
             while (self.marker_inner == True and self.it_inner < self.itmax):
                 self.it_inner += 1
                 self.AssembleGlobalSystem()
-                self.ApplyBoundaryConditions()
+                #self.ApplyBoundaryConditions()
                 self.SolveSystem()
                 print('OUTER ITERATION = '+str(self.it_outer)+' , INNER ITERATION = '+str(self.it_inner))
-
+                self.UpdateElementalPHI()
                 self.PlotSolution(self.PHI_inner1)
                 
                 self.CheckConvergence("INNER")
@@ -440,13 +607,14 @@ class Equili:
                 
             self.CheckConvergence("OUTER")
             
-                
         return
     
     def PlotSolution(self,phi):
         if len(np.shape(phi)) == 2:
             phi = phi[:,0]
         plt.figure(figsize=(7,10))
+        plt.ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
+        plt.xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
         plt.tricontourf(self.X[:,0],self.X[:,1], phi, levels=30)
         plt.tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors='k')
         #plt.colorbar()
@@ -458,6 +626,8 @@ class Equili:
         Tmesh = self.T + 1
         # Plot nodes
         plt.figure(figsize=(7,10))
+        plt.ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
+        plt.xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
         plt.plot(self.X[:,0],self.X[:,1],'.')
         for e in range(self.Ne):
             for i in range(self.n):
@@ -468,9 +638,9 @@ class Equili:
     
     def PlotMeshClassifiedElements(self):
         plt.figure(figsize=(7,10))
-        plt.tricontourf(self.X[:,0],self.X[:,1], self.PHI_inner0, levels=30, cmap='plasma')
-        plt.tricontour(self.X[:,0],self.X[:,1], self.PHI_inner0, levels=[0], colors='k')
-        #plt.colorbar()
+        plt.ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
+        plt.xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
+        plt.tricontourf(self.X[:,0],self.X[:,1], self.LevelSet, levels=30, cmap='plasma')
 
         # PLOT NODES
         plt.plot(self.X[:,0],self.X[:,1],'.',color='black')
@@ -491,5 +661,34 @@ class Equili:
                 plt.plot([self.X[int(Tmesh[e,i])-1,0], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,0]], 
                         [self.X[int(Tmesh[e,i])-1,1], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,1]], color='yellow', linewidth=1)
                     
+        plt.tricontour(self.X[:,0],self.X[:,1], self.LevelSet, levels=[0], colors='green',linewidths=3)
+        
+        plt.show()
+        return
+    
+    def PlotInterfaceNormalVectors(self):
+        fig, axs = plt.subplots(1, 2, figsize=(14,10))
+        
+        axs[0].set_xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
+        axs[0].set_ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
+        axs[1].set_xlim(5.5,7)
+        axs[1].set_ylim(2.5,3.5)
+
+        for i in range(2):
+            axs[i].tricontour(self.X[:,0],self.X[:,1], self.LevelSet, levels=[0], colors='green',linewidths=6)
+            for elem in self.InterElems:
+                if i == 0:
+                    dl = 5
+                    axs[i].plot(self.Elements[elem].Xeint[:,0],self.Elements[elem].Xeint[:,1], linestyle='-',color = 'red', linewidth = 2)
+                else:
+                    dl = 10
+                    for j in range(self.Elements[elem].n):
+                        plt.plot([self.Elements[elem].Xe[j,0], self.Elements[elem].Xe[int((j+1)%self.Elements[elem].n),0]], 
+                                [self.Elements[elem].Xe[j,1], self.Elements[elem].Xe[int((j+1)%self.Elements[elem].n),1]], color='k', linewidth=1)
+                    axs[i].plot(self.Elements[elem].Xeint[:,0],self.Elements[elem].Xeint[:,1], linestyle='-',marker='o',color = 'red', linewidth = 2)
+                Xeintmean = np.array([np.mean(self.Elements[elem].Xeint[:,0]),np.mean(self.Elements[elem].Xeint[:,1])])
+                axs[i].arrow(Xeintmean[0],Xeintmean[1],self.Elements[elem].NormalVec[0]/dl,self.Elements[elem].NormalVec[1]/dl,width=0.01)
+                
+        axs[1].set_aspect('equal')
         plt.show()
         return

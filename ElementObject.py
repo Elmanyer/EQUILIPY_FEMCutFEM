@@ -29,8 +29,12 @@ class Element:
         self.Ng2D = None            # NUMBER OF GAUSS NODES IN STANDARD 2D GAUSS QUADRATURE
         self.Wg2D = None            # STANDARD 2D GAUSS INTEGRATION WEIGTHS
         self.N = None               # REFERENCE 2D SHAPE FUNCTIONS EVALUATED AT STANDARD 2D GAUSS INTEGRATION NODES
+        self.Xg = None              # STANDARD PHYSICAL 2D GAUSS INTEGRATION NODES MAPPED FROM REFERENCE ELEMENT 
         self.dNdxi = None           # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT STANDARD 2D GAUSS INTEGRATION NODES
         self.dNdeta = None          # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO ETA EVALUATED AT STANDARD 2D GAUSS INTEGRATION NODES
+        self.invJg = None           # INVERSE MATRICES OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT EVALUATED AT STANDARD GAUSS INTEGRATION NODES
+        self.detJg = None           # MATRIX DETERMINANTS OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT EVALUATED AT STANDARD GAUSS INTEGRATION NODES
+        self.detJg1D = None         # MATRIX DETERMINANTS OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT EVALUATED AT STANDARD GAUSS INTEGRATION NODES 
         
         ### ATTRIBUTES FOR INTERFACE ELEMENTS
         self.interface = None       # INTERFACE GLOBAL INDEX
@@ -47,6 +51,8 @@ class Element:
         # MODIFIED ELEMENTAL INTEGRATION QUADRATURES (1D AND 2D)
         self.XigintREF = None       # MODIFIED REFERENCE GAUSS INTEGRATION NODES COMPUTED FROM 1D STANDARD QUADRATURE
         self.XigmodREF = None       # MODIFIED REFERENCE GAUSS INTEGRATION NODES COMPUTED FROM 2D STANDARD QUADRATURE
+        self.Xgmod = None           # MODIFIED PHYSICAL 2D GAUSS INTEGRATION NODES MAPPED FROM MODIFIED REFERENCE ELEMENT 
+        self.Xgintmod = None        # PHYSICAL 2D GAUSS INTEGRATION NODES MAPPED FROM 1D REFERENCE ELEMENT 
         
         self.Nintmod = None         # REFERENCE 2D SHAPE FUNCTIONS EVALUATED AT MODIFIED 1D GAUSS INTEGRATION NODES 
         self.dNdxiintmod = None     # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT MODIFIED 1D GAUSS INTEGRATION NODES 
@@ -54,6 +60,9 @@ class Element:
         self.Nmod = None            # REFERENCE 2D SHAPE FUNCTIONS EVALUATED AT MODIFIED 2D GAUSS INTEGRATION NODES
         self.dNdximod = None        # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT MODIFIED 2D GAUSS INTEGRATION NODES
         self.dNdetamod = None       # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO ETA EVALUATED AT MODIFIED 2D GAUSS INTEGRATION NODES
+        self.invJgmod = None        # INVERSE MATRICES OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE SUBELEMENTS TO 2D PHYSICAL SUBELEMENTS EVALUATED AT  CORRESPONDING MODIFIED GAUSS INTEGRATION NODES
+        self.detJgmod = None        # MATRIX DETERMINANTS OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE SUBELEMENTS TO 2D PHYSICAL SUBELEMENTS EVALUATED AT CORRESPONDING MODIFIED GAUSS INTEGRATION NODES  
+        self.detJgintmod = None     # MATRIX DETERMINANTS OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT INTERFACE EVALUATED AT GAUSS INTEGRATION NODES
         
         return
     
@@ -249,15 +258,67 @@ class Element:
         elif Mode == 0:
             return XeTESS, TeTESS
         
+        
+    def ComputeStandardQuadratures(self,Order):
+        """ This function computes the standard FEM Gauss quadratures corresponding to integrations in 2D and 1D. In the case of elements which 
+        are NOT cut by the interface, such standard FEM numerical integration quadratures are used directly to perform the integrations. On the other hand, 
+        if the element IS cut by the interface, adapted quadratures are computed by modifying the standard approach. The modified quadratures are computed 
+        in subroutine 'ComputeModifiedQuadratures'. In any case, all elements need to have access to the standard quadrature values. 
+        Input: - Order: Gauss quadrature order 
+        
+        Relevant quantities:
+            ### 1D REFERENCE ELEMENT:
+            #   Xig1D: STANDARD GAUSS NODAL COORDINATES IN 1D REFERENCE ELEMENT
+            #   Wg1D: STANDARD GAUSS WEIGHTS IN 1D REFERENCE ELEMENT
+            #   Ng1D: NUMBER OF GAUSS INTEGRATION NODES IN 1D REFERENCE QUADRATURE
+            #   N1D: 1D REFERENCE SHAPE FUNCTIONS EVALUATED AT 1D STANDARD REFERENCE GAUSS INTEGRATION NODES
+            #   dNdxi1D: 1D REFERENCE SHAPE FUNCTIONS DERIVATIVES EVALUATED AT 1D STANDARD REFERENCE GAUSS INTEGRATION NODES
+            ### 2D REFERENCE ELEMENT:
+            #   Xig2D: STANDARD GAUSS NODAL COORDINATES IN 2D REFERENCE ELEMENT
+            #   Wg2D: STANDARD GAUSS WEIGHTS IN 2D REFERENCE ELEMENT
+            #   Ng2D: NUMBER OF GAUSS INTEGRATION NODES IN 2D REFERENCE QUADRATURE
+            #   N: 2D REFERENCE SHAPE FUNCTIONS EVALUATED AT 2D STANDARD REFERENCE GAUSS INTEGRATION NODES
+            #   dNdxi: 2D REFERENCE SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT 2D STANDARD REFERENCE GAUSS INTEGRATION NODES
+            #   dNdeta: 2D REFERENCE SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT 2D STANDARD REFERENCE GAUSS INTEGRATION NODES
+            """
+        
+        # COMPUTE THE STANDARD QUADRATURE ON THE REFERENCE SPACE, FOR BOTH 1D AND 2D
+        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE SURFACES (2D)
+        self.Xig2D, self.Wg2D, self.Ng2D = GaussQuadrature(self.ElType,Order)
+        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
+        self.Xig1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,Order)
+        
+        # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
+        # EVALUATE REFERENCE SHAPE FUNCTIONS 
+        self.N, self.dNdxi, self.dNdeta = EvaluateReferenceShapeFunctions(self.Xig2D, self.ElType, self.ElOrder, self.n)
+        #### QUADRATURE TO INTEGRATE LINES (1D)
+        self.N1D, self.dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.Xig1D, 0, Order-1, self.n1D)
+        
+        # ONLY FOR VACUUM AND PLASMA REGION ELEMENTS WE PRECOMPUTE THE NECESSARY INTEGRATION ENTITIES EVALUATED AT THE GAUSS INTEGRATION NODES.
+        # WE COMPUTE THUS:
+        #       - THE JACOBIAN OF THE TRANSFORMATION BETWEEN REFERENCE AND PHYSICAL 2D SPACES INVERSE MATRIX 
+        #       - THE JACOBIAN OF THE TRANSFORMATION BETWEEN REFERENCE AND PHYSICAL 2D SPACES MATRIX DETERMINANT
+        #       - THE STANDARD PHYSICAL GAUSS INTEGRATION NODES MAPPED FROM THE REFERENCE ELEMENT
+        if self.Dom != 0:   
+            # COMPUTE MAPPED GAUSS NODES
+            self.Xg = self.N @ self.Xe
+            # COMPUTE JACOBIAN INVERSE AND DETERMINANT
+            self.invJg = np.zeros([self.Ng2D,self.dim,self.dim])
+            self.detJg = np.zeros([self.Ng2D])
+            Rmean = np.sum(self.Xe[:,0])/self.n   # mean elemental radial position
+            for ig in range(self.Ng2D):
+                self.invJg[ig,:,:], self.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],self.dNdxi[ig,:],self.dNdeta[ig,:])
+                self.detJg[ig] *= 2*np.pi*Rmean   # ACCOUNT FOR AXISYMMETRICAL
+        
+        return
     
     
-    def ComputeModifiedQuadratures(self,Order):
+    def ComputeModifiedQuadratures(self):
         """ This function computes the Gauss quadratures corresponding to a 2D and 1D integration. In the case of elements which 
         are NOT cut by the interface, the standard FEM numerical integration quadratures are prepared. On the other hand, if the element
         IS cut by the interface, an adapted quadrature is computed in this case by modifying the standard approach.  
-        Input: - Order: Gauss quadrature order
         
-        Important quantities:
+        Relevant quantities:
             ### 1D REFERENCE ELEMENT:
             #   Xig1D: STANDARD GAUSS NODAL COORDINATES IN 1D REFERENCE ELEMENT
             #   Wg1D: STANDARD GAUSS WEIGHTS IN 1D REFERENCE ELEMENT
@@ -290,61 +351,114 @@ class Element:
             #    4. PERFORM TESSELLATION ON PHYSICAL ELEMENT 
             #    5. DETERMINE ON TO WHICH REGION (INSIDE OR OUTSIDE) FALLS EACH SUBELEMENT
         """
-        
-        # FOR ALL ELEMENTS, COMPUTE THE STANDARD QUADRATURE ON THE REFERENCE SPACE, FOR BOTH 1D AND 2D
-        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE SURFACES (2D)
-        self.Xig2D, self.Wg2D, self.Ng2D = GaussQuadrature(self.ElType,Order)
-        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
-        self.Xig1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,Order)
-        
-        # FOR ALL ELEMENTS, WE EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
-        # EVALUATE REFERENCE SHAPE FUNCTIONS 
-        self.N, self.dNdxi, self.dNdeta = EvaluateReferenceShapeFunctions(self.Xig2D, self.ElType, self.ElOrder, self.n)
-        #### QUADRATURE TO INTEGRATE LINES (1D)
-        self.N1D, self.dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.Xig1D, 0, Order-1, self.n1D)
-        
-        # THE REFERENCE SHAPE FUNCTIONS EVALUATED ON THE STANDARD GAUSS INTEGRATION NODES REPRESENTS THE STANDARD QUADRATURE FOR VACUUM AND PLASMA REGION ELEMENTS,
-        # BUT THEY ARE ALSO NECESSARY TO COMPUTE THE MODIFIED QUADRATURES ON THE INTERFACE ELEMENTS
             
-        if self.Dom == 0:   # FOR INTERFACE ELEMENTS, THE MODIFIED GAUSS INTEGRATION NODES MUST BE COMPUTED
+        # 1. MAP THE PHYSICAL INTERFACE ON THE REFERENCE ELEMENT
+        XeintREF = np.zeros(np.shape(self.Xeint))
+        for i in range(2):
+            XeintREF[i,:] = self.InverseMapping(self.Xeint[i,:])
             
-            # 1. MAP THE PHYSICAL INTERFACE ON THE REFERENCE ELEMENT
-            XeintREF = np.zeros(np.shape(self.Xeint))
-            for i in range(2):
-                XeintREF[i,:] = self.InverseMapping(self.Xeint[i,:])
+        ######### 1D MODIFIED GAUSS NODES
+        # 2(1D). MAP 1D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE INTERFACE 
+        self.XigintREF = np.zeros([self.Ng1D,self.dim])
+        for ig in range(self.Ng1D):
+            self.XigintREF[ig,:] = self.N1D[ig,:] @ XeintREF
+        #########
+        
+        ######### 2D MODIFIED GAUSS NODES
+        # 2(2D). DO TESSELLATION ON REFERENCE ELEMENT
+        XeREF = np.array([[1,0], [0,1], [0,0]])
+        self.XimodREF, self.TemodREF = self.Tessellation(Mode=0,Xe=XeREF,Xeint=XeintREF)
+        self.Nsub = np.shape(self.TemodREF)[0]
+        
+        # 3(2D). MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS 
+        self.XigmodREF = np.zeros([self.Nsub*self.Ng2D,self.dim])
+        for i in range(self.Nsub):
+            for ig in range(self.Ng2D):
+                self.XigmodREF[self.Ng2D*i+ig,:] = self.N[ig,:] @ self.XimodREF[self.TemodREF[i,:]]
                 
-            ######### 1D MODIFIED GAUSS NODES
-            # 2(1D). MAP 1D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE INTERFACE 
-            self.XigintREF = np.zeros([self.Ng1D,self.dim])
-            for ig in range(self.Ng1D):
-                self.XigintREF[ig,:] = self.N1D[ig,:] @ XeintREF
-            #########
+        # 4(2D). PERFORM TESSELLATION ON PHYSICAL ELEMENT AND GENERATE SUBELEMENTS
+        self.Temod = self.Tessellation(Mode=1,Xemod=self.Xemod)
+        
+        # 5(2D). DETERMINE ON TO WHICH REGION (INSIDE OR OUTSIDE) FALLS EACH SUBELEMENT
+        if self.LSe[self.permu[0]] < 0:  # COMMON NODE YIELD LS < 0 -> INSIDE REGION
+            self.Dommod = np.array([-1,1,1])
+        else:
+            self.Dommod = np.array([1,-1,-1])
+        #########
+        
+        # EVALUATE 2D REFERENCE SHAPE FUNCTION ON MODIFIED GAUSS INTEGRATION NODES
+        self.Nintmod, self.dNdxiintmod, self.dNdetaintmod = EvaluateReferenceShapeFunctions(self.XigintREF, self.ElType, self.ElOrder, self.n)
+        self.Nmod, self.dNdximod, self.dNdetamod = EvaluateReferenceShapeFunctions(self.XigmodREF, self.ElType, self.ElOrder, self.n)
+        
+        # MAPP MODIFIED REFERENCE INTEGRATION NODES TO PHYSICAL ELEMENT
+        self.Xgmod = self.Nmod @ self.Xe
+        # self.Xgmod = np.zeros([self.Nsub*self.Ng2D,self.dim])
+        # for subelem in range(self.Nsub):
+        #   self.Xgmod[subelem*self.Ng2D:(subelem+1)*self.Ng2D,:] = self.N @ self.Xemod[self.Temod[subelem,:],:]
+        
+        self.Xgintmod = self.N1D @ self.Xeint
+                
+        # COMPUTE JACOBIAN MATRICES OF TRANSFORMATIONS
+        self.invJgmod = np.zeros([self.Nsub,self.Ng2D,self.dim,self.dim])
+        self.detJgmod = np.zeros([self.Nsub,self.Ng2D])
+        for subelem in range(self.Nsub):
+            Rmeansub = np.sum(self.Xemod[self.Temod[subelem,:],0])/self.n   # mean elemental radial position
+            for ig in range(self.Ng2D):
+                self.invJgmod[subelem,ig,:,:], self.detJgmod[subelem,ig] = Jacobian(self.Xemod[self.Temod[subelem,:],0],self.Xemod[self.Temod[subelem,:],1],self.dNdximod[ig,:],self.dNdetamod[ig,:])
+                self.detJgmod[subelem,ig] *= 2*np.pi*Rmeansub   # ACCOUNT FOR AXISYMMETRICAL
+                
+        self.detJgintmod = np.zeros([self.Ng1D])
+        Rmean = np.sum(self.Xe[:,0])/self.n   # mean elemental radial position
+        for ig in range(self.Ng1D):
+            self.detJgintmod[ig] = Jacobian1D(self.Xeint[:,0],self.Xeint[:,1],self.dNdxi1D[ig,:])  
+            self.detJgintmod[ig] *= 2*np.pi*Rmean   # ACCOUNT FOR AXISYMMETRICAL
             
-            ######### 2D MODIFIED GAUSS NODES
-            # 2(2D). DO TESSELLATION ON REFERENCE ELEMENT
-            XeREF = np.array([[1,0], [0,1], [0,0]])
-            self.XimodREF, self.TemodREF = self.Tessellation(Mode=0,Xe=XeREF,Xeint=XeintREF)
-            self.Nsub = np.shape(self.TemodREF)[0]
             
-            # 3(2D). MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS 
-            self.XigmodREF = np.zeros([self.Nsub*self.Ng2D,self.dim])
-            for i in range(self.Nsub):
-                for ig in range(self.Ng2D):
-                    self.XigmodREF[self.Ng2D*i+ig,:] = self.N[ig,:] @ self.XimodREF[self.TemodREF[i,:]]
-                    
-            # 4(2D). PERFORM TESSELLATION ON PHYSICAL ELEMENT
-            self.Temod = self.Tessellation(Mode=1,Xemod=self.Xemod)
+        ##################################################
+        """
+        # 4(2D). PERFORM TESSELLATION ON PHYSICAL ELEMENT AND GENERATE SUBELEMENTS
+        #self.Temod = self.Tessellation(Mode=1,Xemod=self.Xemod)
+        
+        # INTERPOLATE LEVEL-SET AND UNKNOW PHI
+        # WE INTERPOLATE BOTH FUNCTIONS ON THE DESIRED POINTS BY USING THE SHAPE FUNCTIONS EVALUATED AT THE EQUIVALENT POINTS IN THE REFERENCE SPACE
+        Ninterpolate, foo, foo = EvaluateReferenceShapeFunctions(self.XimodREF, self.ElType, self.ElOrder, self.n)
+        self.SubElements = [Element(index = subelem, ElType = self.ElType, ElOrder = self.ElOrder,
+                                    Xe = self.Xemod[self.Temod[subelem,:]],
+                                    Te = self.Te,
+                                    LSe = Ninterpolate[self.TemodREF[subelem,:],:] @ self.LSe,
+                                    PHIe = Ninterpolate[self.TemodREF[subelem,:],:] @ self.PHIe) for subelem in range(self.Nsub)]
+        
+        # 5(2D). DETERMINE ON TO WHICH REGION (INSIDE OR OUTSIDE) FALLS EACH SUBELEMENT
+        if self.LSe[self.permu[0]] < 0:  # COMMON NODE YIELD LS < 0 -> INSIDE REGION
+            Dommod = np.array([-1,1,1])
+        else:
+            Dommod = np.array([1,-1,-1])
+        
+        # EVALUATE 2D REFERENCE SHAPE FUNCTION ON MODIFIED GAUSS INTEGRATION NODES
+        Nmod, dNdximod, dNdetamod = EvaluateReferenceShapeFunctions(self.XigmodREF, self.ElType, self.ElOrder, self.n)
+        
+        # MAPP MODIFIED REFERENCE INTEGRATION NODES TO PHYSICAL ELEMENT
+        Xgmod = self.Nmod @ self.Xe
+        
+        
+        for subelem in range(self.Nsub):
+            # REFERENCE SHAPE FUNCTIONS EVALUATED ON MODIFIED QUADRATURE NODES
+            self.SubElements[subelem].N = Nmod[subelem*self.Ng2D:(subelem+1)*self.Ng2D,:]
+            self.SubElements[subelem].dNdxi = dNdximod[subelem*self.Ng2D:(subelem+1)*self.Ng2D,:]
+            self.SubElements[subelem].dNdeta = dNdetamod[subelem*self.Ng2D:(subelem+1)*self.Ng2D,:]
+            # MAPP MODIFIED REFERENCE INTEGRATION NODES TO PHYSICAL SUBELEMENT
+            self.SubElements[subelem].Xg = Xgmod[subelem*self.Ng2D:(subelem+1)*self.Ng2D,:]
             
-            # 5(2D). DETERMINE ON TO WHICH REGION (INSIDE OR OUTSIDE) FALLS EACH SUBELEMENT
-            if self.LSe[self.permu[0]] < 0:  # COMMON NODE YIELD LS < 0 -> INSIDE REGION
-                self.Dommod = np.array([-1,1,1])
-            else:
-                self.Dommod = np.array([1,-1,-1])
-            #########
+            # COMPUTE JACOBIAN MATRICES OF TRANSFORMATIONS
+            self.SubElements[subelem].invJg = np.zeros([self.Ng2D,self.n,self.n])
+            self.SubElements[subelem].detJg = np.zeros([self.Ng2D])
+            Rmeansub = np.sum(self.SubElements[subelem].Xe[:,0])/self.SubElements[subelem].n   # mean subelemental radial position
+            for ig in range(self.Ng2D):
+                self.SubElements[subelem].invJg[ig,:,:], self.SubElements[subelem].detJg[ig] = Jacobian(self.SubElements[subelem].Xe[:,0],self.SubElements[subelem].Xe[:,1],self.dNdximod[ig,:],self.dNdetamod[ig,:])
+                self.SubElements[subelem].detJg[ig] *= 2*np.pi*Rmeansub   # ACCOUNT FOR AXISYMMETRICAL
+            """
             
-            # EVALUATE 2D REFERENCE SHAPE FUNCTION ON MODIFIED GAUSS INTEGRATION NODES
-            self.Nintmod, self.dNdxiintmod, self.dNdetaintmod = EvaluateReferenceShapeFunctions(self.XigintREF, self.ElType, self.ElOrder, self.n)
-            self.Nmod, self.dNdximod, self.dNdetamod = EvaluateReferenceShapeFunctions(self.XigmodREF, self.ElType, self.ElOrder, self.n)
+            
         return 
     
     
@@ -367,7 +481,7 @@ class Element:
         if LStest > 0:  # TEST POINT OUTSIDE PLASMA REGION
             self.NormalVec = ntest
         else:   # TEST POINT INSIDE PLASMA REGION --> NEED TO TAKE THE OPPOSITE NORMAL VECTOR
-            self.NormalVec = -ntest
+            self.NormalVec = -1*ntest
         
         return 
         
