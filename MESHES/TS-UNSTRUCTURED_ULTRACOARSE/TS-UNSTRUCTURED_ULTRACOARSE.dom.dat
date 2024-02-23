@@ -1,0 +1,32 @@
+$------------------------------------------------------------
+DIMENSIONS
+  NODAL_POINTS=          204
+  ELEMENTS=              356
+  SPACE_DIMENSIONS=        2
+  TYPES_OF_ELEMENTS=      10,      0,      0,      0,      0
+  BOUNDARIES=             50
+END_DIMENSIONS
+$------------------------------------------------------------
+STRATEGY
+  INTEGRATION_RULE:                Open  
+  DOMAIN_INTEGRATION_POINTS:       0  
+  EXTRAPOLATE_BOUNDARY_CONDITIONS: On
+  BOUNDARY_ELEMENT:                On
+  GROUPS=                             100, Sequential_frontal  
+END_STRATEGY
+$-------------------------------------------------------------
+GEOMETRY
+  INCLUDE  TS-UNSTRUCTURED_ULTRACOARSE.geo.dat
+END_GEOMETRY  
+$-------------------------------------------------------------
+SETS
+  INCLUDE  TS-UNSTRUCTURED_ULTRACOARSE.set.dat  
+END_SETS
+$-------------------------------------------------------------
+BOUNDARY_CONDITIONS
+  INCLUDE  TS-UNSTRUCTURED_ULTRACOARSE.fix.dat  
+END_BOUNDARY_CONDITIONS
+$-------------------------------------------------------------
+FIELDS
+END_FIELDS
+$-------------------------------------------------------------

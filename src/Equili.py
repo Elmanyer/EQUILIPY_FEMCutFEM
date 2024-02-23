@@ -5,9 +5,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from random import random
 from scipy.interpolate import griddata
-from GaussQuadrature import *
-from ShapeFunctions import *
-from ElementObject import *
+from src.GaussQuadrature import *
+from src.ShapeFunctions import *
+from src.ElementObject import *
 
 class Equili:
     

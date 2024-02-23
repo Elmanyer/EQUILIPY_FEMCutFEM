@@ -1,8 +1,8 @@
 """ THIS SCRIPT DEFINES THE ATTRIBUTES AND METHODS CORRESPONDING TO OBJECT ELEMENT. THIS CLASS SHALL GATHER ALL THE RELEVANT INFORMATION (COORDINATES,
 QUADRATURES, NODAL VALUES...) FOR A SINGLE ELEMENT IN THE MESH. """
 
-from GaussQuadrature import *
-from ShapeFunctions import *
+from src.GaussQuadrature import *
+from src.ShapeFunctions import *
 from scipy import optimize
 
 class Element:
