@@ -202,13 +202,13 @@ class Equili:
         return
     
     def ComputeIntegrationQuadratures(self):
-        # COMPUTE STANDARD QUADRATURE VALUES FOR ALL MESH ELEMENTS 
-        for Element in self.Elements:
-            Element.ComputeStandardQuadratures(self.QuadratureOrder)
+        # COMPUTE STANDARD QUADRATURE ENTITIES FOR NON-CUT ELEMENTS 
+        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems), axis=0):
+            self.Elements[elem].ComputeStandardQuadrature(self.QuadratureOrder)
             
-        # COMPUTE MODIFIED QUADRATURE VALUES FOR INTERFACE ELEMENTS
+        # COMPUTE MODIFIED QUADRATURE ENTITIES FOR INTERFACE ELEMENTS
         for elem in self.InterElems:
-            self.Elements[elem].ComputeModifiedQuadratures()
+            self.Elements[elem].ComputeModifiedQuadrature(self.QuadratureOrder)
         return
     
     def ComputeInterfaceNormals(self):
@@ -225,54 +225,6 @@ class Equili:
                 raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
         return
     
-    def IntegrateElementalDomainTerms(self,n,Te,ng,Wg,Xg,SourceTerm,invJg,detJg,N,dNdxi,dNdeta):
-        """ Input:
-                    - n: NUMBER OF NODES IN ELEMENT
-                    - Te: ELEMENTAL CONECTIVITIES
-                    """
-        # LOOP OVER GAUSS INTEGRATION NODES
-        for ig in range(ng):  
-            # SHAPE FUNCTIONS GRADIENT
-            print(dNdxi)
-            Ngrad = np.array([dNdxi[ig,:],dNdeta[ig,:]])
-            # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM 
-            for i in range(n):   # ROWS ELEMENTAL MATRIX
-                for j in range(n):   # COLUMNS ELEMENTAL MATRIX
-                    # COMPUTE LHS MATRIX TERMS
-                    ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
-                    self.LHS[Te[i],Te[j]] -= np.transpose((invJg[ig,:,:]@Ngrad[:,i]))@(invJg[ig,:,:]@Ngrad[:,j])*detJg[ig]*Wg[ig]
-                    ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                    self.LHS[Te[i],Te[j]] -= (1/Xg[ig,0])*N[ig,j] * (invJg[ig,0,:]@Ngrad[:,i])*detJg[ig]*Wg[ig]
-                # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
-                self.RHS[Te[i]] += SourceTerm[ig] * N[ig,i] *detJg[ig]*Wg[ig]
-        return
-    
-    def IntegrateInterfaceTerms(self,n,Te,ng,Wg,Xg,NormalVec,detJg,N,dNdxi,dNdeta):
-    
-        # LOOP OVER GAUSS INTEGRATION NODES
-        for ig in range(ng):  
-            
-            # SHAPE FUNCTIONS GRADIENT
-            Ngrad = np.array([dNdxi[ig,:],dNdeta[ig,:]])
-            # COMPUTE BOUNDARY CONDITION VALUES
-            PHId = self.BoundaryCondition(Xg)
-            
-            # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
-            for i in range(n):  # ROWS ELEMENTAL MATRIX
-                for j in range(n):  # COLUMNS ELEMENTAL MATRIX
-                    # COMPUTE LHS MATRIX TERMS
-                    ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
-                    self.LHS[Te[i],Te[j]] += N[ig,i] * NormalVec @ Ngrad[:,j] * detJg[ig] * Wg[ig]
-                    ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
-                    self.LHS[Te[i],Te[j]] += NormalVec @ Ngrad[:,i]*(N[ig,j] * detJg[ig] * Wg[ig])
-                    ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
-                    self.LHS[Te[i],Te[j]] += self.beta * N[ig,i] * N[ig,j] * detJg[ig] * Wg[ig]
-                # COMPUTE RHS VECTOR TERMS 
-                ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
-                self.RHS[Te[i]] +=  PHId * NormalVec @ Ngrad[:,i] * detJg[ig] * Wg[ig]
-                ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
-                self.RHS[Te[i]] +=  self.beta * N[ig,i] * PHId * detJg[ig] * Wg[ig]
-        return
     
     def AssembleGlobalSystem(self):
         """ This routine assembles the global matrices derived from the discretised linear system of equations used the common Galerkin approximation. 
@@ -286,174 +238,72 @@ class Equili:
         # ELEMENTS INSIDE AND OUTSIDE PLASMA REGION (ELEMENTS WHICH ARE NOT CUT)
         print("     Assemble non-cut elements...", end="")
         for elem in np.concatenate((self.PlasmaElems, self.VacuumElems), axis=0): 
-            #print(elem)  
+            # ISOLATE ELEMENT 
+            ELEMENT = self.Elements[elem] 
             
+            ####### COMPUTE DOMAIN TERMS 
             # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
-            source = np.zeros([self.Elements[elem].Ng2D])
-            if self.Elements[elem].Dom < 0:
+            SourceTermg = np.zeros([ELEMENT.Ng2D])
+            if ELEMENT.Dom < 0:
                 # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
-                PHIg = self.Elements[elem].N @ self.Elements[elem].PHIe
+                PHIg = ELEMENT.N @ ELEMENT.PHIe
                 for ig in range(self.Elements[elem].Ng2D):
-                    source[ig] = self.mu0*self.Elements[elem].Xg[ig,0]*Jphi(self.mu0,self.Elements[elem].Xg[ig,0],self.Elements[elem].Xg[ig,1],PHIg[ig]) 
-            
-            # LOOP OVER GAUSS INTEGRATION NODES
-            self.IntegrateElementalDomainTerms(n = self.Elements[elem].n,
-                                               Te = self.Elements[elem].Te,
-                                               ng = self.Elements[elem].Ng2D,
-                                               Wg = self.Elements[elem].Wg2D,
-                                               Xg = self.Elements[elem].Xg,
-                                               SourceTerm = source,
-                                               invJg = self.Elements[elem].invJg,
-                                               detJg = self.Elements[elem].detJg,
-                                               N = self.Elements[elem].N,
-                                               dNdxi = self.Elements[elem].dNdxi,
-                                               dNdeta = self.Elements[elem].dNdeta)
-        
+                    SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*Jphi(self.mu0,ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig]) 
+            # COMPUTE ELEMENTAL MATRICES
+            LHSe, RHSe = ELEMENT.IntegrateElementalDomainMatrices(SourceTermg)
+            # ASSEMBLE INTO GLOBAL SYSTEM
+            for i in range(ELEMENT.n):
+                for j in range(ELEMENT.n):
+                    self.LHS[ELEMENT.Te[i],ELEMENT.Te[j]] = LHSe[i,j]
+                self.RHS[ELEMENT.Te[i]] = RHSe[i]
+                
         print("Done!")
         
         print("     Assemble cut elements...", end="")
         # INTERFACE ELEMENTS (CUT ELEMENTS)
         for elem in self.InterElems:
-            #print(elem)
+            # ISOLATE ELEMENT 
+            ELEMENT = self.Elements[elem]
             
             # NOW, EACH INTERFACE ELEMENT IS DIVIDED INTO SUBELEMENTS ACCORDING TO THE POSITION OF THE APPROXIMATED INTERFACE ->> TESSELLATION
             # ON EACH SUBELEMENT THE WEAK FORM IS INTEGRATED USING ADAPTED NUMERICAL INTEGRATION QUADRATURES
+            ####### COMPUTE DOMAIN TERMS
             # LOOP OVER SUBELEMENTS 
-            for subelem in range(self.Elements[elem].Nsub):  
-                
+            for SUBELEM in ELEMENT.SubElements:  
                 # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
-                source = np.zeros([self.Elements[elem].Ng2D])
-                if self.Elements[elem].Dommod[subelem] < 0:
+                SourceTermg = np.zeros([SUBELEM.Ng2D])
+                if SUBELEM.Dom < 0:
                     # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
-                    PHIg = self.Elements[elem].Nmod[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:] @ self.Elements[elem].PHIe
-                    for ig in range(self.Elements[elem].Ng2D):
-                        source[ig] = self.mu0*self.Elements[elem].Xgmod[subelem*self.Elements[elem].Ng2D+ig,0]*Jphi(self.mu0,self.Elements[elem].Xgmod[subelem*self.Elements[elem].Ng2D+ig,0],
-                                                                                                                    self.Elements[elem].Xgmod[subelem*self.Elements[elem].Ng2D+ig,1],PHIg[ig])
+                    PHIg = SUBELEM.N @ ELEMENT.PHIe
+                    for ig in range(SUBELEM.Ng2D):
+                        SourceTermg[ig] = self.mu0*SUBELEM.Xg2D[ig,0]*Jphi(self.mu0,SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])
                 
-                # LOOP OVER GAUSS INTEGRATION NODES
-                self.IntegrateElementalDomainTerms(n = self.Elements[elem].n,
-                                                Te = self.Elements[elem].Te,   ##!!!!
-                                                ng = self.Elements[elem].Ng2D,
-                                                Wg = self.Elements[elem].Wg2D,
-                                                Xg = self.Elements[elem].Xgmod[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:],
-                                                SourceTerm = source,
-                                                invJg = self.Elements[elem].invJgmod[subelem,:,:,:],
-                                                detJg = self.Elements[elem].detJgmod[subelem,:],
-                                                N = self.Elements[elem].Nmod[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:],
-                                                dNdxi = self.Elements[elem].dNdxi[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:],
-                                                dNdeta = self.Elements[elem].dNdeta[subelem*self.Elements[elem].Ng2D:(subelem+1)*self.Elements[elem].Ng2D,:])
+                # COMPUTE ELEMENTAL MATRICES
+                LHSe, RHSe = SUBELEM.IntegrateElementalDomainMatrices(SourceTermg)
+                # ASSEMBLE INTO GLOBAL SYSTEM
+                for i in range(SUBELEM.n):
+                    for j in range(SUBELEM.n):
+                        self.LHS[SUBELEM.Te[i],SUBELEM.Te[j]] = LHSe[i,j]
+                    self.RHS[SUBELEM.Te[i]] = RHSe[i]    
+                     
+            ####### COMPUTE INTERFACE TERMS
+            # COMPUTE INTERFACE CONDITIONS PHI_D
+            PHI_Dg = np.zeros([ELEMENT.Ng1D])
+            for ig in range(ELEMENT.Ng1D):
+                PHI_Dg[ig] = self.BoundaryCondition(ELEMENT.Xgint[ig,:])
                 
-            # INTEGRATE OVER INTERFACE
-            self.IntegrateInterfaceTerms(n = self.Elements[elem].n,
-                                         Te = self.Elements[elem].Te,
-                                         ng = self.Elements[elem].Ng1D,
-                                         Wg = self.Elements[elem].Wg1D,
-                                         Xg = self.Elements[elem].Xgintmod,
-                                         NormalVec = self.Elements[elem].NormalVec,
-                                         detJg = self.Elements[elem].detJgintmod,
-                                         N = self.Elements[elem].Nintmod,
-                                         dNdxi = self.Elements[elem].dNdxiintmod,
-                                         dNdeta = self.Elements[elem].dNdetaintmod)
+            # COMPUTE ELEMENTAL MATRICES
+            LHSe, RHSe = ELEMENT.IntegrateElementalInterfaceMatrices(PHI_Dg,self.beta)
+            # ASSEMBLE INTO GLOBAL SYSTEM
+            for i in range(ELEMENT.n):
+                for j in range(ELEMENT.n):
+                    self.LHS[ELEMENT.Te[i],ELEMENT.Te[j]] = LHSe[i,j]
+                self.RHS[ELEMENT.Te[i]] = RHSe[i]
             
         print("Done!")
         
         return
     
-    
-    
-    """def AssembleGlobalSystem(self):
-        "" This routine assembles the global matrices derived from the discretised linear system of equations used the common Galerkin approximation. 
-        Nonetheless, due to the unfitted nature of the method employed, integration in cut cells (elements containing the interface between plasma region 
-        and vacuum region, defined by the level-set 0-contour) must be treated accurately. ""
-        
-        # INITIALISE GLOBAL SYSTEM MATRICES
-        self.LHS = np.zeros([self.Nn,self.Nn])
-        self.RHS = np.zeros([self.Nn, 1])
-        
-        # ELEMENTS INSIDE AND OUTSIDE PLASMA REGION (ELEMENTS WHICH ARE NOT CUT)
-        print("     Assemble non-cut elements...", end="")
-        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems), axis=0): 
-            #print(elem)   
-            # COMPUTE MEAN RADIAL POSITION
-            Rmean = np.sum(self.Elements[elem].Xe[:,0])/self.Elements[elem].n   # mean elemental radial position
-            # ISOLATE NODAL PHI VALUES
-            PHIe = self.PHI_inner0[self.T[elem,:]]
-            # LOOP OVER GAUSS INTEGRATION NODES
-            for ig in range(self.Elements[elem].Ng2D):  
-                # MAPP GAUSS NODAL COORDINATES FROM REFERENCE ELEMENT TO PHYSICAL ELEMENT
-                Xg = self.Elements[elem].N[ig,:] @ self.Elements[elem].Xe
-                # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL ELEMENT
-                PHIg = self.Elements[elem].N[ig,:] @ PHIe
-                # COMPUTE JACOBIAN INVERSE AND DETERMINANT
-                invJ, detJ = Jacobian(self.Elements[elem].Xe[:,0],self.Elements[elem].Xe[:,1],self.Elements[elem].dNdxi[ig,:],self.Elements[elem].dNdeta[ig,:])
-                detJ *= 2*np.pi*Rmean   # ACCOUNT FOR AXISYMMETRICAL 
-                # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
-                if self.Elements[elem].Dom < 0:
-                    SourceTerm = self.mu0*Xg[0]*Jphi(self.mu0,Xg[0],Xg[1],PHIg)
-                else:
-                    SourceTerm = 0
-                # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM 
-                for i in range(self.Elements[elem].n):   # ROWS ELEMENTAL MATRIX
-                    for j in range(self.Elements[elem].n):   # COLUMNS ELEMENTAL MATRIX
-                        # COMPUTE LHS MATRIX TERMS
-                        ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
-                        self.LHS[self.T[elem,i],self.T[elem,j]] -= (np.transpose((invJ@np.array([[self.Elements[elem].dNdxi[ig,i]],[self.Elements[elem].dNdeta[ig,i]]])))@
-                                                                    (invJ@np.array([[self.Elements[elem].dNdxi[ig,j]],[self.Elements[elem].dNdeta[ig,j]]])))*detJ*self.Elements[elem].Wg2D[ig]
-                        ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                        self.LHS[self.T[elem,i],self.T[elem,j]] -= (1/Xg[0])*self.Elements[elem].N[ig,j] * (invJ[0,:]@np.array([[self.Elements[elem].dNdxi[ig,i]],
-                                                                                                                    [self.Elements[elem].dNdeta[ig,i]]]))*detJ*self.Elements[elem].Wg2D[ig]
-                    # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
-                    self.RHS[self.T[elem,i]] += SourceTerm * self.Elements[elem].N[ig,i] *detJ*self.Elements[elem].Wg2D[ig]
-        
-        print("Done!")
-        
-        print("     Assemble cut elements...", end="")
-        # INTERFACE ELEMENTS (CUT ELEMENTS)
-        for elem in self.InterElems:
-            #print(elem)
-            # COMPUTE MEAN RADIAL POSITION
-            Rmean = np.sum(self.Elements[elem].Xe[:,0])/self.Elements[elem].n   # mean elemental radial position
-            # ISOLATE NODAL PHI VALUES
-            PHIe = self.PHI_inner0[self.T[elem,:]]
-            
-            # NOW, EACH INTERFACE ELEMENT IS DIVIDED INTO SUBELEMENTS ACCORDING TO THE POSITION OF THE APPROXIMATED INTERFACE ->> TESSELLATION
-            # ON EACH SUBELEMENT THE WEAK FORM IS INTEGRATED USING ADAPTED NUMERICAL INTEGRATION QUADRATURES
-            # LOOP OVER SUBELEMENTS 
-            for subelem in range(self.Elements[elem].Nsub):  
-                # ISOLATE NODAL COORDINATES FOR SUBELEMENT
-                Xesub = self.Elements[elem].Xemod[self.Elements[elem].Temod[subelem,:],:]
-                Rmeansub = np.sum(Xesub[:,0])/self.n   # mean subelemental radial position
-                # LOOP OVER MODIFIED GAUSS INTEGRATION NODES
-                for igsub in range(self.Elements[elem].Ng2D): 
-                    ig = subelem*self.Elements[elem].Nsub+igsub 
-                    # MAPP GAUSS NODAL COORDINATES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
-                    Xgmod = self.Elements[elem].N[igsub,:] @ Xesub
-                    # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
-                    PHIgmod = self.Elements[elem].Nmod[ig,:] @ PHIe
-                    # COMPUTE JACOBIAN INVERSE AND DETERMINANT
-                    invJ, detJ = Jacobian(Xesub[:,0],Xesub[:,1],self.Elements[elem].dNdximod[ig,:],self.Elements[elem].dNdetamod[ig,:])
-                    detJ *= 2*np.pi*Rmeansub   # ACCOUNT FOR AXISYMMETRICAL 
-                    # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
-                    if self.Elements[elem].Dommod[subelem] < 0:
-                        SourceTerm = self.mu0*Xgmod[0]*Jphi(self.mu0,Xgmod[0],Xgmod[1],PHIgmod)
-                    else:
-                        SourceTerm = 0
-                    # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM 
-                    for i in range(self.Elements[elem].n):   # ROWS ELEMENTAL MATRIX
-                        for j in range(self.Elements[elem].n):   # COLUMNS ELEMENTAL MATRIX
-                            # COMPUTE LHS MATRIX TERMS
-                            ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
-                            self.LHS[self.T[elem,i],self.T[elem,j]] -= (np.transpose((invJ@np.array([[self.Elements[elem].dNdximod[ig,i]],[self.Elements[elem].dNdetamod[ig,i]]])))@
-                                                                    (invJ@np.array([[self.Elements[elem].dNdximod[ig,j]],[self.Elements[elem].dNdetamod[ig,j]]])))*detJ*self.Elements[elem].Wg2D[igsub]
-                            ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                            self.LHS[self.T[elem,i],self.T[elem,j]] -= (1/Xgmod[0])*self.Elements[elem].Nmod[ig,j] * (invJ[0,:]@np.array([[self.Elements[elem].dNdximod[ig,i]],
-                                                                                                                    [self.Elements[elem].dNdetamod[ig,i]]]))*detJ*self.Elements[elem].Wg2D[igsub]
-                        # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
-                        self.RHS[self.T[elem,i]] += SourceTerm * self.Elements[elem].Nmod[ig,i] *detJ*self.Elements[elem].Wg2D[igsub]
-        print("Done!")
-        
-        return
-    """
     
     def BoundaryCondition(self, x):
         
@@ -463,43 +313,6 @@ class Equili:
         
         return phiD
     
-
-    """
-    def ApplyBoundaryConditions(self):
-        "" Function computing the boundary integral terms arising from Nitsche's method (weak imposition of BC) and assembling 
-        into the global system. Such terms only affect the elements containing the interface. ""
-        
-        for elem in self.InterElems:
-        
-            # LOOP OVER GAUSS INTEGRATION NODES
-            for ig in range(self.Elements[elem].Ng1D):  
-                # MAPP 1D GAUSS NODAL COORDINATES ON PHYSICAL INTERFACE 
-                Xg = self.Elements[elem].N1D[ig,:] @ self.Elements[elem].Xeint
-                # COMPUTE BOUNDARY CONDITION VALUES
-                PHId = self.BoundaryCondition(Xg)
-                # COMPUTE JACOBIAN OF TRANSFORMATION
-                detJ1D = Jacobian1D(self.Elements[elem].Xeint[:,0],self.Elements[elem].Xeint[:,1],self.Elements[elem].dNdxi1D[ig,:])   ## !!!! REVISAR
-                # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
-                for i in range(self.Elements[elem].n):  # ROWS ELEMENTAL MATRIX
-                    for j in range(self.Elements[elem].n):  # COLUMNS ELEMENTAL MATRIX
-                        # COMPUTE LHS MATRIX TERMS
-                        ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
-                        self.LHS[self.T[elem,i],self.T[elem,j]] += self.Elements[elem].Nintmod[ig,i] * self.Elements[elem].NormalVec @ np.array([[self.Elements[elem].dNdxiintmod[ig,j]],
-                                                                                                        [self.Elements[elem].dNdetaintmod[ig,j]]]) * detJ1D * self.Elements[elem].Wg1D[ig]
-                        ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
-                        self.LHS[self.T[elem,i],self.T[elem,j]] += self.Elements[elem].NormalVec @ np.array([[self.Elements[elem].dNdxiintmod[ig,i]],
-                                                                                [self.Elements[elem].dNdetaintmod[ig,i]]])*(self.Elements[elem].Nintmod[ig,j]*detJ1D*self.Elements[elem].Wg1D[ig])
-                        ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
-                        self.LHS[self.T[elem,i],self.T[elem,j]] += self.beta * self.Elements[elem].Nintmod[ig,i] * self.Elements[elem].Nintmod[ig,j] * detJ1D * self.Elements[elem].Wg1D[ig]
-                    # COMPUTE RHS VECTOR TERMS 
-                    ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
-                    self.RHS[self.T[elem,i]] +=  PHId * self.Elements[elem].NormalVec @ np.array([[self.Elements[elem].dNdxiintmod[ig,i]],
-                                                                                                  [self.Elements[elem].dNdetaintmod[ig,i]]])*detJ1D*self.Elements[elem].Wg1D[ig]
-                    ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
-                    self.RHS[self.T[elem,i]] +=  self.beta * self.Elements[elem].Nintmod[ig,i] * PHId * detJ1D * self.Elements[elem].Wg1D[ig]
-                
-        return
-    """
     
     def SolveSystem(self):
         
