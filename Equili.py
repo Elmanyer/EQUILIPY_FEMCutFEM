@@ -3,10 +3,11 @@ in an axisymmetrical system such as a tokamak. """
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy import optimize
+from random import random
 from GaussQuadrature import *
 from ShapeFunctions import *
 from PlasmaCurrent import *
+from ElementObject import *
 
 class Equili:
     
@@ -28,6 +29,7 @@ class Equili:
         self.Rmax = Rmax
         self.Rmin = Rmin
         self.R0 = (Rmax+Rmin)/2
+        self.QuadratureOrder = 2
         self.TOL_inner = 1e-3
         self.TOL_outer = 1e-3
         self.itmax = 5
@@ -37,23 +39,7 @@ class Equili:
     
     def ReadMesh(self):
         # NUMBER OF NODES PER ELEMENT
-        match self.ElType:
-            case 0:
-                match self.ElOrder:
-                    case 1:
-                        self.n = 3
-                    case 2: 
-                        self.n = 6
-                    case 3:
-                        self.n = 10
-            case 1:
-                match self.ElOrder:
-                    case 1:
-                        self.n = 4
-                    case 2:
-                        self.n = 9
-                    case 3:
-                        self.n = 16
+        self.n = ElementalNumberOfNodes(self.ElType, self.ElOrder)
         
         # READ DOM FILE .dom.dat
         MeshDataFile = self.directory +'/'+ self.case +'.dom.dat'
@@ -145,6 +131,7 @@ class Equili:
         self.coeffs = self.ComputeLinearSolutionCoefficients()
         for i in range(self.Nn):
             phi0[i] = Xstar[i,0]**4/8 + self.coeffs[0] + self.coeffs[1]*Xstar[i,0]**2 + self.coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
+            phi0[i] *= 2*random()
         return phi0
     
     
@@ -162,19 +149,22 @@ class Equili:
         kint = 0
                 
         for e in range(self.Ne):
-            LSe = self.LevelSet[self.T[e,:]]  # elemental nodal level-set values
+            LSe = self.Elements[e].LSe  # elemental nodal level-set values
             for i in range(self.n-1):
                 if np.sign(LSe[i]) !=  np.sign(LSe[i+1]):  # if the sign between nodal values change -> interface element
                     self.InterElems[kint] = e
+                    self.Elements[e].Dom = 0
                     kint += 1
                     break
                 else:
                     if i+2 == self.n:   # if all nodal values hasve the same sign
                         if np.sign(LSe[i+1]) > 0:   # all nodal values with positive sign -> vacuum vessel element
                             self.VacuumElems[kvacuu] = e
+                            self.Elements[e].Dom = +1
                             kvacuu += 1
                         else:   # all nodal values with negative sign -> plasma region element 
                             self.PlasmaElems[kplasm] = e
+                            self.Elements[e].Dom = -1
                             kplasm += 1
                             
         # DELETE REST OF UNUSED MEMORY
@@ -184,345 +174,13 @@ class Equili:
         return
     
     
-    def InterfaceLinearApproximation(self, element_index):
-        """ Function computing the intersection points between the element edges and the interface (for elements containing the interface) 
-            FOR THE MOMENT, DESIGNED EXCLUSIVELY FOR TRIANGULAR ELEMENTS
-        Input: - element_index: index of element for which to compute approximated interface coordinates 
-        Output: - interface: matrix containing the coordinates of points located at the intrsection between the interface and the element's edges
-                - Te: modified elemental conectivity matrix, where the first entry corresponds to the node "alone" in its respective region (common node 
-                    to both edges intersecting with interface), and the following entries correspond to the other elemental nodes, which together with the
-                    first one, define the edges intersecting the interface. """
-        # READ CONNECTIVITIES
-        Te = self.T[element_index,:]
-        # READ NODAL COORDINATES 
-        Xe = self.X[Te,:]
-        # READ LEVEL-SET NODAL VALUES
-        LSe = self.LevelSet[Te]  
-        # LOOK FOR THE NODE WHICH HAS DIFFERENT SIGN...
-        pospos = np.where(LSe > 0)[0]
-        posneg = np.where(LSe < 0)[0]
-        # ... PIVOT COORDINATES MATRIX ACCORDINGLY
-        if len(pospos) > len(posneg):  # 2 nodal level-set values are positive (outside plasma region)
-            pos = np.concatenate((posneg,pospos),axis=0)
-            Te = Te[pos]
-            Xe = Xe[pos]
-            LSe = LSe[pos]
-        else: # 2 nodal level-set values are negative (inside plasma region)
-            pos = np.concatenate((pospos,posneg),axis=0)
-            Te = Te[pos]
-            Xe = Xe[pos]
-            LSe = LSe[pos]
-
-        # NOW, THE FIRST ROW IN Xe AND FIRST ELEMENT IN LSe CORRESPONDS TO THE NODE ALONE IN ITS RESPECTIVE REGION (INSIDE OR OUTSIDE PLASMA REGION)
-
-        # WE DEFINE NOW THE DIFFERENT FUNCTION WE NEED IN ORDER TO BUILD THE TRANSCENDENTAL EQUATION CHARACTERISING THE INTERSECTION BETWEEN
-        # THE ELEMENT'S EDGE AND THE LEVEL-SET 0-CONTOUR
-        def z(r,Xe,edge):
-            # FUNCTION DESCRIBING THE RESTRICCION ASSOCIATED TO THE ELEMENT EDGE
-            z = ((Xe[edge,1]-Xe[0,1])*r+Xe[0,1]*Xe[edge,0]-Xe[edge,1]*Xe[0,0])/(Xe[edge,0]-Xe[0,0])
-            return z
-
-        def fun(r,Xe,LSe,edge):
-            def N0(r,z,Xe):
-                # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE WHICH IS "ALONE" IN RESPECTIVE REGION (OUTSIDE OR INSIDE PLASMA REGION)
-                j = 1
-                k = 2
-                N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
-                return N
-            def Nedge(r,z,Xe,edge):
-                # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE ALONG THE EDGE FOR WHICH FIND THE INTERSECTION WITH LEVEL-SET 0-CONTOUR
-                j = (edge+1)%3
-                k = (edge+2)%3
-                N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
-                return N
+    def ComputeInterfaceApproximation(self):
+        """ Compute the coordinates for the points describing the interface linear approximation. """
             
-            # TRANSCENDENTAL EQUATION TO SOLVE
-            f = N0(r,z(r,Xe,edge),Xe)*LSe[0] + Nedge(r,z(r,Xe,edge),Xe,edge)*LSe[edge]
-            return f
-
-        # SOLVE TRANSCENDENTAL EQUATION FOR BOTH EDGES AND OBTAIN INTERSECTION COORDINATES
-        interface = np.zeros([2,2])
-        for i, edge in enumerate([1,2]):
-            sol = optimize.root(fun, Xe[0,0], args=(Xe,LSe,edge))
-            interface[i,:] = [sol.x, z(sol.x,Xe,edge)]
-        
-        return interface, Te
-    
-    def ComputeInterfaceCoordinates(self):
-        """ Compute the coordinates for the points describing the interface linear approximation 
-        The coordinates are organised in a 3D matrix as follows:
-                InterfaceCoordinates = [[[x11 y11]   # coordinates point 1 interface 1
-                                         [x12 y12]]  # coordinates point 2 interface 1
-                                        
-                                        [[x21 y21]   # coordinates point 1 interface 2
-                                         [x22 y22]]  # coordinates point 2 interface 2
-                                        
-                                        [[x31 y31]   # coordinates point 1 interface 3
-                                          x31 y31]]  # coordinates point 2 interface 3 
-                                            ...     
-                                                                
-        On the other hand, this function also returns the mofidied elemental connectivities, such that 
-                Tinter = [[NELinterface1 NNODEcommonvertex1 NNODEedge11 NNODEedge12]
-                          [NELinterface2 NNODEcommonvertex2 NNODEedge21 NNODEedge22]
-                          [NELinterface3 NNODEcommonvertex3 NNODEedge31 NNODEedge32]
-                                                  ... 
-                    where: -> NELinterface-i is the element global index for the i-th interface 
-                           -> NNODEcommonvertex-i is the global index for the node which is common to both edges intersecting with the i-th interface
-                           -> NNODEedge-ij is the global index for the node defining the j-th edge intersecting the i-th interface """
-
-        Nintersections = 2 # 2D can only be 2 intersections of interface with element edges
-        self.InterfaceCoordinates = np.zeros([len(self.InterElems),Nintersections,self.dim])
-        self.Tinter = np.zeros([len(self.InterElems), self.n+1], dtype= int)
-
-        for i, element in enumerate(self.InterElems):
-            interface, Te = self.InterfaceLinearApproximation(element)
-            self.InterfaceCoordinates[i,:,:] = interface
-            self.Tinter[i,0] = element
-            self.Tinter[i,1:] = Te 
-
+        for inter, elem in enumerate(self.InterElems):
+            self.Elements[elem].InterfaceLinearApproximation()
+            self.Elements[elem].interface = inter
         return
-    
-    def InverseMapping(self, X, element):
-        """ This function represents the inverse mapping corresponding to the transformation from natural to physical coordinates. 
-        That is, given a point in physical space with coordinates X in the specified element, this function returns the point mapped
-        in the natural reference frame with coordinates Xg. 
-        In order to do that, we solve the nonlinear system implicitly araising from the original isoparametric mapping equations. 
-        
-        Input: - X: physical nodal coordinates 
-               - element: index of element 
-        Output: - Xg: mapped reference nodal coodinates """
-        
-        # READ ELEMENTAL NODAL COORDINATES 
-        Xe = self.X[self.T[element,:],:]
-        # DEFINE THE NONLINEAR SYSTEM 
-        def fun(Xg, X, Xe):
-            f = np.array([-X[0],-X[1]])
-            for i in range(self.n):
-                Nig, foo, foo = ShapeFunctionsReference(Xg,self.ElType, self.ElOrder, i+1)
-                f[0] += Nig*Xe[i,0]
-                f[1] += Nig*Xe[i,1]
-            return f
-        # SOLVE USING NONLINEAR SOLVER
-        Xg0 = np.array([1/2, 1/2])  # INITIAL GUESS FOR ROOT SOLVER
-        sol = optimize.root(fun, Xg0, args=(X,Xe))
-        Xg = sol.x
-        return Xg
-    
-    
-    def SubdivideTriangularInterfaceElement(self, interface):
-        """ Function computing the subdivision elements 
-        Input: - interface: index of the interface contained in the element 
-        Output: - Xemod: nodal coordinates matrix for element containing interface, such that the last 2 rows correspond to the intersection points between interface and element edges
-                - Temod: local connectivity matrix for 3 triangular subelements 
-                - Dom: array indicating in which region (unside or outside) is located each subtriangle
-                - PHIemod: nodal PHI values (inner iteration n) for nodes in cut element, such that the last 2 elements correspond to the intersection points between interface and element edges"""
-        
-        Xe = self.X[self.Tinter[interface,:],1:]   # nodal coordinates of element, where the first row is the node common to both edges intersecting with the interface
-        Xeint = self.InterfaceCoordinates[interface,:,:]   # coordinates of intersections between interface and edges
-
-        # MODIFIED NODAL MATRIX AND CONECTIVITIES, ACCOUNTING FOR 3 SUBTRIANGLES 
-        Xemod = np.concatenate((Xe, Xeint), axis=0)
-        Temod = np.zeros([3, self.n], dtype = int)  # local connectivities for 3 subtriangles
-        PHIemod = np.zeros([self.n+2])
-
-        Temod[0,:] = [0, 3, 4]  # first triangular subdomain is common node and intersection nodes
-        if self.phi_inner0[self.Tinter[interface,1]] < 0:  # COMMON NODE YIELD PHI < 0 -> INSIDE REGION
-            Dom = np.array([-1,1,1])
-        else:
-            Dom = np.array([1,-1,-1])
-            
-        # COMPUTE PHI VALUES AT THE NODES IN ELEMENT AND INTERSECTION BETWEEN INTERFACE AND EDGES
-        PHIemod[:3] = self.phi_inner0[self.Tinter[interface,1:]]  # the first 3 values correspond to the nodal phi values 
-        # INTERPOLATE TO FIND VALUES AT INTERFACE INTERSECTIONS
-        for i in range(self.n):
-            PHIemod[3] += ShapeFunctionsPhysical(Xeint[0,:], Xe, self.elemType, self.elemOrder, i+1)*self.phi_inner0[self.Tinter[interface,i+1]]  # first intersection
-            PHIemod[4] += ShapeFunctionsPhysical(Xeint[1,:], Xe, self.elemType, self.elemOrder, i+1)*self.phi_inner0[self.Tinter[interface,i+1]]  # second interection
-
-        # PREPARE TESSELATION
-        # COMPARE DISTANCE INTERFACE-(EDGE NODE)
-        edge = 1
-        distance1 = np.linalg.norm(Xeint[edge-1,:]-Xe[edge,:])
-        edge = 2
-        distance2 = np.linalg.norm(Xeint[edge-1,:]-Xe[edge,:])
-
-        if distance1 < distance2:
-            Temod[1,:] = [3, 1, 2]
-            Temod[2,:] = [3, 4, 2]
-        if distance1 > distance2:
-            Temod[1,:] = [4, 2, 1]
-            Temod[2,:] = [4, 3, 1]
-            
-        return Xemod, Temod, Dom, PHIemod
-    
-    
-    def CheckNodeOnEdge(self,x,Xe,TOL):
-        """ Function which checks if point with coordinates x is on any edge of the element with nodal coordinates Xe. """
-        n = np.shape(Xe)[0]
-        edgecheck = False
-        for edge in range(n):
-            i = edge
-            j = (edge+1)%n
-            if abs(Xe[j,0]-Xe[i,0]) < 1e-6:  # infinite slope <=> vertical edge
-                if abs(Xe[i,0]-x[0]) < TOL:
-                    edgecheck = True
-                    break
-            y = lambda x : ((Xe[j,1]-Xe[i,1])*x+Xe[i,1]*Xe[j,0]-Xe[j,1]*Xe[i,0])/(Xe[j,0]-Xe[i,0])  # function representing the restriction on the edge
-            if abs(y(x[0])-x[1]) < TOL:
-                edgecheck = True
-                break
-        if edgecheck == True:
-            return i, j
-        else:
-            return "Point not on edges"
-        
-    
-    def Tessellation(self,Xe,Xeint):
-        """ This function performs the TESSELLATION of an element with nodal coordinates Xe and interface coordinates Xeint (intersection with edges) 
-        Input: - Xe: element nodal coordinates 
-               - Xeint: coordinates of intersection points between interface and edges 
-        Output: - XeTESS: Nodal coordinates matrix storing the coordinates of the element vertex and interface points 
-                - TeTESS: Tessellation connectivity matrix such that 
-                        TeTESS = [[Connectivities for subelement 1]
-                                  [Connectivities for subelement 2]
-                                                ...                            
-                """
-                
-        # FIRST WE NEED TO DETERMINE WHICH IS THE VERTEX COMMON TO BOTH EDGES INTERSECTING WITH THE INTERFACE
-        # AND ORGANISE THE NODAL MATRIX ACCORDINGLY SO THAT
-        #       - THE FIRST ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH IS SHARED BY BOTH EDGES INTERSECTING THE INTERFACE 
-        #       - THE SECOND ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH DEFINES THE EDGE ON WHICH THE FIRST INTERSECTION POINT IS LOCATED
-        #       - THE THIRD ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH DEFINES THE EDGE ON WHICH THE SECOND INTERSECTION POINT IS LOCATED
-        Nint = np.shape(Xeint)[0]  # number of intersection points
-        edgenodes = np.zeros(np.shape(Xeint), dtype=int)
-        nodeedgeinter = np.zeros([Nint], dtype=int)
-        for i in range(Nint):
-            edgenodes[i,:] = self.CheckNodeOnEdge(Xeint[i,:],Xe,1e-4)
-        commonnode = (set(edgenodes[0,:])&set(edgenodes[1,:])).pop()
-        for i in range(Nint):
-            edgenodesset = set(edgenodes[i,:])
-            edgenodesset.remove(commonnode)
-            nodeedgeinter[i] = edgenodesset.pop()
-        
-        Xe = Xe[np.concatenate((np.array([commonnode]), nodeedgeinter), axis=0),:]
-
-        # MODIFIED NODAL MATRIX AND CONECTIVITIES, ACCOUNTING FOR 3 SUBTRIANGLES 
-        XeTESS = np.concatenate((Xe, Xeint), axis=0)
-        TeTESS = np.zeros([3, self.n], dtype = int)  # connectivities for 3 subtriangles
-
-        TeTESS[0,:] = [0, 3, 4]  # first triangular subdomain is common node and intersection nodes
-
-        # COMPARE DISTANCE INTERFACE-(EDGE NODE)
-        edge = 1
-        distance1 = np.linalg.norm(Xeint[edge-1,:]-Xe[edge,:])
-        edge = 2
-        distance2 = np.linalg.norm(Xeint[edge-1,:]-Xe[edge,:])
-
-        if distance1 <= distance2:
-            TeTESS[1,:] = [3, 1, 2]
-            TeTESS[2,:] = [3, 4, 2]
-        if distance1 > distance2:
-            TeTESS[1,:] = [4, 2, 1]
-            TeTESS[2,:] = [4, 3, 1]
-        
-        return XeTESS, TeTESS
-    
-    
-    def ComputeModifiedQuadrature2D(self,interface):
-        """ This function returns the modified 2D Gauss quadrature to integrate over an interface element. 
-        Input: - interface: index of the interface for which compute modified quadrature
-        Output: - Xemod: nodal coordinates matrix for tessellated physical element
-                - Temod: connectivity matrix for subelements in tessellated physical element
-                - XgmodREF: Gaus integration nodal coordinates for subelements in tessellated reference element
-                - Dom: array specifying the region, inside or outside, on which each physical subelement falls
-        
-        Important quantities in this routine:
-        ### 2D REFERENCE ELEMENT:
-        #   XeREF: NODAL COORDINATES OF 2D REFERENCE ELEMENT
-        #   XeintREF: NODAL COORDINATES OF INTERFACE IN 2D REFERENCE ELEMENT
-        #   XemodREF: NODAL COORDINATES OF 2D REFERENCE ELEMENT WITH TESSELLATION
-        #   TemodREF: CONNECTIVITY MATRIX OF 2D REFERENCE ELEMENT WITH TESSELLATION
-        #   XgmodREF: GAUSS NODAL COORDINATES IN 2D REFERENCE ELEMENT WITH TESSELLATION, MODIFIED QUADRATURE
-        ### 2D PHYSICAL ELEMENT:
-        #   Xe: NODAL COORDINATES OF 2D PHYSICAL ELEMENT 
-        #   Xeint: NODAL COORDINATES OF INTERFACE IN 2D PHYSICAL ELEMENT
-        #   Xemod: NODAL COORDINATES OF 2D PHYSICAL ELEMENT WITH TESSELLATION
-        #   Temod: CONNECTIVITY MATRIX OF 2D PHYSICAL ELEMENT WITH TESSELLATION
-        
-        # IN ORDER TO COMPUTE THE MODIFIED QUADRATURE, WE NEED TO:
-        #    1. MAP THE PHYSICAL INTERFACE ON THE REFERENCE ELEMENT -> OBTAIN REFERENCE INTERFACE
-        #    2. PERFORM TESSELLATION ON THE REFERENCE ELEMENT -> OBTAIN NODAL COORDINATES OF REFERENCE SUBELEMENTS
-        #    3. MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS 
-        #    4. PERFORM TESSELLATION ON PHYSICAL ELEMENT """
-        
-        element = self.Tinter[interface,0]
-        Xe = self.X[self.T[element,:],:]
-        Xeint = self.InterfaceCoordinates[interface,:,:]
-        
-        # 1. MAP THE PHYSICAL INTERFACE ON THE REFERENCE ELEMENT
-        XeintREF = np.zeros([2,2])
-        for i in range(2):
-            XeintREF[i,:] = self.InverseMapping(Xeint[i,:], element)
-        
-        # 2. DO TESSELLATION ON REFERENCE ELEMENT
-        XeREF = np.array([[1,0], [0,1], [0,0]])
-        XemodREF, TemodREF = self.Tessellation(XeREF,XeintREF)
-        Nsub = np.shape(TemodREF)[0]
-        
-        # 3. MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS 
-        XgmodREF = np.zeros([Nsub*self.Ng2D,self.dim])
-        for i in range(Nsub):
-            for ig in range(self.Ng2D):
-                XgmodREF[self.Ng2D*i+ig,:] = self.N[ig,:] @ XemodREF[TemodREF[i,:]]
-                
-        # 4. PERFORM TESSELLATION ON PHYSICAL ELEMENT
-        Xemod, Temod = self.Tessellation(Xe,Xeint)
-        
-        # 5. DETERMINE ON TO WHICH REGION (INSIDE OR OUTSIDE) FALLS EACH SUBELEMENT
-        if self.LevelSet[self.Tinter[interface,1]] < 0:  # COMMON NODE YIELD PHI < 0 -> INSIDE REGION
-            Dom = np.array([-1,1,1])
-        else:
-            Dom = np.array([1,-1,-1])
-        
-        return Xemod, Temod, XgmodREF, Dom
-    
-    
-    def ComputeModifiedQuadrature1D(self,interface):
-        """ This function returns the modified 1D Gauss quadrature to integrate over the interface linear approximation cutting the element. 
-        Input: -
-        Output: - 
-        
-        Important quantities in this routine:
-        ### 1D REFERENCE ELEMENT:
-        #   zline: GAUSS NODAL COORDINATES IN 1D REFERENCE ELEMENT
-        #   wline: GAUSS WEIGHTS IN 1D REFERENCE ELEMENT
-        ### 2D REFERENCE ELEMENT:
-        #   XeREF: NODAL COORDINATES OF 2D REFERENCE ELEMENT
-        #   XeintREF: NODAL COORDINATES OF INTERFACE IN 2D REFERENCE ELEMENT
-        #   XgintREF: GAUSS NODAL COORDINATES IN 2D REFERENCE ELEMENT
-        ### 2D PHYSICAL ELEMENT:
-        #   Xe: NODAL COORDINATES OF 2D PHYSICAL ELEMENT 
-        #   Xeint: NODAL COORDINATES OF INTERFACE IN 2D PHYSICAL ELEMENT
-        #   Xgint: GAUSS NODAL COORDINATES IN 2D PHYSICAL ELEMENT 
-         
-        # IN ORDER TO COMPUTE THE MODIFIED QUADRATURE, WE NEED TO:
-        #    1. MAP THE PHYSICAL INTERFACE ON THE REFERENCE ELEMENT -> OBTAIN REFERENCE INTERFACE
-        #    2. MAP 1D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE INTERFACE 
-        # """
-        
-        element = self.Tinter[interface,0]
-        Xeint = self.InterfaceCoordinates[interface,:,:]
-        
-        # 1. MAP THE PHYSICAL INTERFACE ON THE REFERENCE ELEMENT
-        XeintREF = np.zeros([2,2])
-        for i in range(2):
-            XeintREF[i,:] = self.InverseMapping(Xeint[i,:], element)
-            
-        # 2. MAP 1D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE INTERFACE 
-        XgintREF = np.zeros([self.Ng1D,self.dim])
-        for ig in range(self.Ng1D):
-            XgintREF[ig,:] = self.N1D[ig,:] @ XeintREF
-        
-        return XgintREF
     
     
     def AssembleGlobalSystem(self):
@@ -538,110 +196,86 @@ class Equili:
         print("     Assemble non-cut elements...", end="")
         for elem in np.concatenate((self.PlasmaElems, self.VacuumElems), axis=0): 
             #print(elem)   
-            # ISOLATE PHYSICAL NODAL COORDINATES
-            Xe = self.X[self.T[elem,:],:]
-            Rmean = np.sum(Xe[:,0])/self.n   # mean elemental radial position
+            # COMPUTE MEAN RADIAL POSITION
+            Rmean = np.sum(self.Elements[elem].Xe[:,0])/self.Elements[elem].n   # mean elemental radial position
             # ISOLATE NODAL PHI VALUES
-            PHIe = self.phi_inner0[self.T[elem,:]]
+            PHIe = self.PHI_inner0[self.T[elem,:]]
             # LOOP OVER GAUSS INTEGRATION NODES
-            for ig in range(self.Ng2D):  
+            for ig in range(self.Elements[elem].Ng2D):  
                 # MAPP GAUSS NODAL COORDINATES FROM REFERENCE ELEMENT TO PHYSICAL ELEMENT
-                Xg = self.N[ig,:] @ Xe
+                Xg = self.Elements[elem].N[ig,:] @ self.Elements[elem].Xe
                 # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL ELEMENT
-                PHIg = self.N[ig,:] @ PHIe
+                PHIg = self.Elements[elem].N[ig,:] @ PHIe
                 # COMPUTE JACOBIAN INVERSE AND DETERMINANT
-                invJ, detJ = Jacobian(Xe[:,0],Xe[:,1],self.dNdxi[ig,:],self.dNdeta[ig,:])
+                invJ, detJ = Jacobian(self.Elements[elem].Xe[:,0],self.Elements[elem].Xe[:,1],self.Elements[elem].dNdxi[ig,:],self.Elements[elem].dNdeta[ig,:])
                 detJ *= 2*np.pi*Rmean   # ACCOUNT FOR AXISYMMETRICAL 
                 # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
-                if elem in self.PlasmaElems:
+                if self.Elements[elem].Dom < 0:
                     SourceTerm = self.mu0*Xg[0]*Jphi(self.mu0,Xg[0],Xg[1],PHIg)
                 else:
                     SourceTerm = 0
                 # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM 
-                for i in range(self.n):   # ROWS ELEMENTAL MATRIX
-                    for j in range(self.n):   # COLUMNS ELEMENTAL MATRIX
+                for i in range(self.Elements[elem].n):   # ROWS ELEMENTAL MATRIX
+                    for j in range(self.Elements[elem].n):   # COLUMNS ELEMENTAL MATRIX
                         # COMPUTE LHS MATRIX TERMS
                         ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
-                        self.LHS[self.T[elem,i],self.T[elem,j]] -= (np.transpose((invJ@np.array([[self.dNdxi[ig,i]],[self.dNdeta[ig,i]]])))@(invJ@np.array([[self.dNdxi[ig,j]],[self.dNdeta[ig,j]]])))*detJ*self.Wg2D[ig]
+                        self.LHS[self.T[elem,i],self.T[elem,j]] -= (np.transpose((invJ@np.array([[self.Elements[elem].dNdxi[ig,i]],[self.Elements[elem].dNdeta[ig,i]]])))@
+                                                                    (invJ@np.array([[self.Elements[elem].dNdxi[ig,j]],[self.Elements[elem].dNdeta[ig,j]]])))*detJ*self.Elements[elem].Wg2D[ig]
                         ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                        self.LHS[self.T[elem,i],self.T[elem,j]] -= (1/Xg[0])*self.N[ig,j] * (invJ[0,:]@np.array([[self.dNdxi[ig,i]],[self.dNdeta[ig,i]]]))*detJ*self.Wg2D[ig]
+                        self.LHS[self.T[elem,i],self.T[elem,j]] -= (1/Xg[0])*self.Elements[elem].N[ig,j] * (invJ[0,:]@np.array([[self.Elements[elem].dNdxi[ig,i]],
+                                                                                                                    [self.Elements[elem].dNdeta[ig,i]]]))*detJ*self.Elements[elem].Wg2D[ig]
                     # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
-                    self.RHS[self.T[elem,i]] += SourceTerm * self.N[ig,i] *detJ*self.Wg2D[ig]
+                    self.RHS[self.T[elem,i]] += SourceTerm * self.Elements[elem].N[ig,i] *detJ*self.Elements[elem].Wg2D[ig]
         
         print("Done!")
         
         print("     Assemble cut elements...", end="")
         # INTERFACE ELEMENTS (CUT ELEMENTS)
-        for interface, elem in enumerate(self.InterElems):
-            #print(interface, elem)
-            # ISOLATE PHYSICAL NODAL COORDINATES
-            Xe = self.X[self.T[elem,:],:]
-            Rmean = np.sum(Xe[:,0])/self.n   # mean elemental radial position
+        for elem in self.InterElems:
+            #print(elem)
+            # COMPUTE MEAN RADIAL POSITION
+            Rmean = np.sum(self.Elements[elem].Xe[:,0])/self.Elements[elem].n   # mean elemental radial position
             # ISOLATE NODAL PHI VALUES
-            PHIe = self.phi_inner0[self.T[elem,:]]
+            PHIe = self.PHI_inner0[self.T[elem,:]]
             
-            # NOW, EACH INTERFACE ELEMENT NEEDS TO BE DIVIDED INTO SUBELEMENTS ACCORDING TO THE POSITION OF THE APPROXIMATED INTERFACE,
-            # ON EACH SUBELEMENT A MODIFIED QUADRATURE NEEDS TO BE BUILT IN ORDER TO INTEGRATE 
-            Xemod, Temod, XgmodREF, Dom = self.ComputeModifiedQuadrature2D(interface)
-            # EVALUATE 2D REFERENCE SHAPE FUNCTIONS ON MODIFIED GAUSS NODES
-            Nmod, dNdximod, dNdetamod = EvaluateShapeFunctions(self.ElType, self.ElOrder, self.n, XgmodREF)
+            # NOW, EACH INTERFACE ELEMENT IS DIVIDED INTO SUBELEMENTS ACCORDING TO THE POSITION OF THE APPROXIMATED INTERFACE ->> TESSELLATION
+            # ON EACH SUBELEMENT THE WEAK FORM IS INTEGRATED USING ADAPTED NUMERICAL INTEGRATION QUADRATURES
             # LOOP OVER SUBELEMENTS 
-            Nsubelem = len(Temod[:,0])
-            for subelem in range(Nsubelem):  
+            for subelem in range(self.Elements[elem].Nsub):  
                 # ISOLATE NODAL COORDINATES FOR SUBELEMENT
-                Xesub = Xemod[Temod[subelem,:],:]
+                Xesub = self.Elements[elem].Xemod[self.Elements[elem].Temod[subelem,:],:]
                 Rmeansub = np.sum(Xesub[:,0])/self.n   # mean subelemental radial position
-                # LOOP OVER GAUSS INTEGRATION NODES
-                for igsub in range(self.Ng2D): 
-                    ig = subelem*Nsubelem+igsub 
+                # LOOP OVER MODIFIED GAUSS INTEGRATION NODES
+                for igsub in range(self.Elements[elem].Ng2D): 
+                    ig = subelem*self.Elements[elem].Nsub+igsub 
                     # MAPP GAUSS NODAL COORDINATES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
-                    Xgmod = self.N[igsub,:] @ Xesub
+                    Xgmod = self.Elements[elem].N[igsub,:] @ Xesub
                     # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
-                    PHIgmod = Nmod[ig,:] @ PHIe
+                    PHIgmod = self.Elements[elem].Nmod[ig,:] @ PHIe
                     # COMPUTE JACOBIAN INVERSE AND DETERMINANT
-                    invJ, detJ = Jacobian(Xesub[:,0],Xesub[:,1],dNdximod[ig,:],dNdetamod[ig,:])
+                    invJ, detJ = Jacobian(Xesub[:,0],Xesub[:,1],self.Elements[elem].dNdximod[ig,:],self.Elements[elem].dNdetamod[ig,:])
                     detJ *= 2*np.pi*Rmeansub   # ACCOUNT FOR AXISYMMETRICAL 
                     # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
-                    if Dom[subelem] < 0:
+                    if self.Elements[elem].Dommod[subelem] < 0:
                         SourceTerm = self.mu0*Xgmod[0]*Jphi(self.mu0,Xgmod[0],Xgmod[1],PHIgmod)
                     else:
                         SourceTerm = 0
                     # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM 
-                    for i in range(self.n):   # ROWS ELEMENTAL MATRIX
-                        for j in range(self.n):   # COLUMNS ELEMENTAL MATRIX
+                    for i in range(self.Elements[elem].n):   # ROWS ELEMENTAL MATRIX
+                        for j in range(self.Elements[elem].n):   # COLUMNS ELEMENTAL MATRIX
                             # COMPUTE LHS MATRIX TERMS
                             ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
-                            self.LHS[self.T[elem,i],self.T[elem,j]] -= (np.transpose((invJ@np.array([[dNdximod[ig,i]],[dNdetamod[ig,i]]])))@(invJ@np.array([[dNdximod[ig,j]],[dNdetamod[ig,j]]])))*detJ*self.Wg2D[igsub]
+                            self.LHS[self.T[elem,i],self.T[elem,j]] -= (np.transpose((invJ@np.array([[self.Elements[elem].dNdximod[ig,i]],[self.Elements[elem].dNdetamod[ig,i]]])))@
+                                                                    (invJ@np.array([[self.Elements[elem].dNdximod[ig,j]],[self.Elements[elem].dNdetamod[ig,j]]])))*detJ*self.Elements[elem].Wg2D[igsub]
                             ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                            self.LHS[self.T[elem,i],self.T[elem,j]] -= (1/Xgmod[0])*Nmod[ig,j] * (invJ[0,:]@np.array([[dNdximod[ig,i]],[dNdetamod[ig,i]]]))*detJ*self.Wg2D[igsub]
+                            self.LHS[self.T[elem,i],self.T[elem,j]] -= (1/Xgmod[0])*self.Elements[elem].Nmod[ig,j] * (invJ[0,:]@np.array([[self.Elements[elem].dNdximod[ig,i]],
+                                                                                                                    [self.Elements[elem].dNdetamod[ig,i]]]))*detJ*self.Elements[elem].Wg2D[igsub]
                         # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
-                        self.RHS[self.T[elem,i]] += SourceTerm * Nmod[ig,i] *detJ*self.Wg2D[igsub]
+                        self.RHS[self.T[elem,i]] += SourceTerm * self.Elements[elem].Nmod[ig,i] *detJ*self.Elements[elem].Wg2D[igsub]
         print("Done!")
         
         return
     
-    def InterfaceNormal(self, Xe, Xeint, LSe):
-        """ This function computes the interface normal vector pointing outwards. """
-        
-        dx = Xeint[1,0] - Xeint[0,0]
-        dy = Xeint[1,1] - Xeint[0,1]
-        ntest = np.array([-dy, dx])   # test this normal vector
-        ntest = ntest/np.linalg.norm(ntest)   # normalize
-        Xintmean = np.array([np.mean(Xeint[:,0]), np.mean(Xeint[:,1])])  # mean point on interface
-        Xtest = Xintmean + 2*ntest  # physical point on which to test the Level-Set 
-        
-        # INTERPOLATE LEVEL-SET ON XTEST
-        LStest = 0
-        for i in range(self.n):
-            LStest += ShapeFunctionsPhysical(Xtest, Xe, self.ElType, self.ElOrder, i+1)*LSe[i]
-            
-        # CHECK SIGN OF LEVEL-SET 
-        if LStest > 0:  # TEST POINT OUTSIDE PLASMA REGION
-            n = ntest
-        else:   # TEST POINT INSIDE PLASMA REGION --> NEED TO TAKE THE OPPOSITE NORMAL VECTOR
-            n = -ntest
-    
-        return n
     
     def BoundaryCondition(self, x):
         
@@ -656,48 +290,40 @@ class Equili:
         """ Function computing the boundary integral terms arising from Nitsche's method (weak imposition of BC) and assembling 
         into the global system. Such terms only affect the elements containing the interface. """
         
-        for interface, elem in enumerate(self.InterElems):
-            # ISOLATE PHYSICAL NODAL COORDINATES
-            Xe = self.X[self.T[elem,:],:]
-            # ISOLATE NODAL LEVEL-SET VALUES
-            LSe = self.LevelSet[self.T[elem,:]]
-            # ISOLATE INTERFACE LINEAR APPROXIMATION 
-            Xeint = self.InterfaceCoordinates[interface,:,:]
-            # COMPUTE NORMAL VECTOR RESPECT TO INTERFACE
-            Nvec = self.InterfaceNormal(Xe, Xeint, LSe)
-            # COMPUTE 1D GAUSS MODIFED QUADRATURE ON REFERENCE INTERFACE 
-            XgintREF = self.ComputeModifiedQuadrature1D(interface)
-            # EVALUATE 2D REFERENCE SHAPE FUNCTION ON MODIFIED QUADRATURE GAUSS NODES
-            Nmod, dNdximod, dNdetamod = EvaluateShapeFunctions(self.ElType, self.ElOrder, self.n, XgintREF)
+        for elem in self.InterElems:
+        
             # LOOP OVER GAUSS INTEGRATION NODES
-            for ig in range(self.Ng1D):  
+            for ig in range(self.Elements[elem].Ng1D):  
                 # MAPP 1D GAUSS NODAL COORDINATES ON PHYSICAL INTERFACE 
-                Xg = self.N1D[ig,:] @ Xeint
+                Xg = self.Elements[elem].N1D[ig,:] @ self.Elements[elem].Xeint
                 # COMPUTE BOUNDARY CONDITION VALUES
                 PHId = self.BoundaryCondition(Xg)
                 # COMPUTE JACOBIAN OF TRANSFORMATION
-                detJ1D = Jacobian1D(Xeint[:,0],Xeint[:,1],self.dNdxi1D[ig,:])
+                detJ1D = Jacobian1D(self.Elements[elem].Xeint[:,0],self.Elements[elem].Xeint[:,1],self.Elements[elem].dNdxi1D[ig,:])   ## !!!! REVISAR
                 # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
-                for i in range(self.n):  # ROWS ELEMENTAL MATRIX
-                    for j in range(self.n):  # COLUMNS ELEMENTAL MATRIX
+                for i in range(self.Elements[elem].n):  # ROWS ELEMENTAL MATRIX
+                    for j in range(self.Elements[elem].n):  # COLUMNS ELEMENTAL MATRIX
                         # COMPUTE LHS MATRIX TERMS
                         ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
-                        self.LHS[self.T[elem,i],self.T[elem,j]] += Nmod[ig,i] * Nvec @ np.array([[dNdximod[ig,j]],[dNdetamod[ig,j]]]) * detJ1D * self.Wg1D[ig]
+                        self.LHS[self.T[elem,i],self.T[elem,j]] += self.Elements[elem].Nintmod[ig,i] * self.Elements[elem].NormalVec @ np.array([[self.Elements[elem].dNdxiintmod[ig,j]],
+                                                                                                        [self.Elements[elem].dNdetaintmod[ig,j]]]) * detJ1D * self.Elements[elem].Wg1D[ig]
                         ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
-                        self.LHS[self.T[elem,i],self.T[elem,j]] += Nvec @ np.array([[dNdximod[ig,i]],[dNdetamod[ig,i]]]) * Nmod[ig,j] * detJ1D * self.Wg1D[ig]
+                        self.LHS[self.T[elem,i],self.T[elem,j]] += self.Elements[elem].NormalVec @ np.array([[self.Elements[elem].dNdxiintmod[ig,i]],
+                                                                                [self.Elements[elem].dNdetaintmod[ig,i]]])*(self.Elements[elem].Nintmod[ig,j]*detJ1D*self.Elements[elem].Wg1D[ig])
                         ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
-                        self.LHS[self.T[elem,i],self.T[elem,j]] += self.beta * Nmod[ig,i] * Nmod[ig,j] * detJ1D * self.Wg1D[ig]
+                        self.LHS[self.T[elem,i],self.T[elem,j]] += self.beta * self.Elements[elem].Nintmod[ig,i] * self.Elements[elem].Nintmod[ig,j] * detJ1D * self.Elements[elem].Wg1D[ig]
                     # COMPUTE RHS VECTOR TERMS 
-                    ### SYMMETRIC NITSCHE'S METHOD TERM  [ Phi_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
-                    self.RHS[self.T[elem,i]] +=  PHId * Nvec @ np.array([[dNdximod[ig,i]],[dNdetamod[ig,i]]]) * detJ1D * self.Wg1D[ig]
-                    ### PENALTY TERM   [ beta * N_i * Phi_D *(Jacobiano*2pi*rad) ]
-                    self.RHS[self.T[elem,i]] +=  self.beta * Nmod[ig,i] * PHId * detJ1D * self.Wg1D[ig]
+                    ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
+                    self.RHS[self.T[elem,i]] +=  PHId * self.Elements[elem].NormalVec @ np.array([[self.Elements[elem].dNdxiintmod[ig,i]],
+                                                                                                  [self.Elements[elem].dNdetaintmod[ig,i]]])*detJ1D*self.Elements[elem].Wg1D[ig]
+                    ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
+                    self.RHS[self.T[elem,i]] +=  self.beta * self.Elements[elem].Nintmod[ig,i] * PHId * detJ1D * self.Elements[elem].Wg1D[ig]
                 
         return
     
     def SolveSystem(self):
         
-        self.phi_inner1 = np.linalg.solve(self.LHS, self.RHS)
+        self.PHI_inner1 = np.linalg.solve(self.LHS, self.RHS)
         
         return
     
@@ -705,50 +331,69 @@ class Equili:
         
         if loop == "INNER":
             # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
-            if np.linalg.norm(self.phi_inner1) > 0:
-                L2residu = np.linalg.norm(self.phi_inner1 - self.phi_inner0)/np.linalg.norm(self.phi_inner1)
+            if np.linalg.norm(self.PHI_inner1) > 0:
+                L2residu = np.linalg.norm(self.PHI_inner1 - self.PHI_inner0)/np.linalg.norm(self.PHI_inner1)
             else: 
-                L2residu = np.linalg.norm(self.phi_inner1 - self.phi_inner0)
+                L2residu = np.linalg.norm(self.PHI_inner1 - self.PHI_inner0)
             if L2residu < self.TOL_inner:
                 self.marker_inner = False   # STOP WHILE LOOP 
-                self.phi_outer1 = self.phi_inner1
+                self.PHI_outer1 = self.PHI_inner1
             else:
                 self.marker_inner = True
-                self.phi_inner0 = self.phi_inner1
+                self.PHI_inner0 = self.PHI_inner1
             
         elif loop == "OUTER":
             # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
-            if np.linalg.norm(self.phi_outer1) > 0:
-                L2residu = np.linalg.norm(self.phi_outer1 - self.phi_outer0)/np.linalg.norm(self.phi_outer1)
+            if np.linalg.norm(self.PHI_outer1) > 0:
+                L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)/np.linalg.norm(self.PHI_outer1)
             else: 
-                L2residu = np.linalg.norm(self.phi_outer1 - self.phi_outer0)
+                L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)
             if L2residu < self.TOL_outer:
                 self.marker_outer = False   # STOP WHILE LOOP 
-                self.phi_converged = self.phi_outer1
+                self.PHI_converged = self.PHI_outer1
             else:
                 self.marker_outer = True
-                self.phi_outer0 = self.phi_outer1
+                self.PHI_outer0 = self.PHI_outer1
         return 
+    
+    def InitialiseVariables(self):
+        self.PHI_inner0 = np.zeros([self.Nn])      # solution at inner iteration n
+        self.PHI_inner1 = np.zeros([self.Nn])      # solution at inner iteration n+1
+        self.PHI_outer0 = np.zeros([self.Nn])      # solution at outer iteration n
+        self.PHI_outer1 = np.zeros([self.Nn])      # solution at outer iteration n+1
+        self.PHI_converged = np.zeros([self.Nn])   # solution at outer iteration n+1
+        return
+    
+    def ComputeIntegrationQuadratures(self):
+        for Element in self.Elements:
+            Element.ComputeModifiedQuadratures(self.QuadratureOrder)
+        return
+    
+    def ComputeInterfaceNormals(self):
+        for elem in self.InterElems:
+            self.Elements[elem].InterfaceNormal()
+        return
 
     
     def PlasmaEquilibrium(self):
         
         # INITIALISE VARIABLES
-        self.phi_inner0 = np.zeros([self.Nn])      # solution at inner iteration n
-        self.phi_inner1 = np.zeros([self.Nn])      # solution at inner iteration n+1
-        self.phi_outer0 = np.zeros([self.Nn])      # solution at outer iteration n
-        self.phi_outer1 = np.zeros([self.Nn])      # solution at outer iteration n+1
-        self.phi_converged = np.zeros([self.Nn])   # solution at outer iteration n+1
+        self.InitialiseVariables()
         
         # INITIAL GUESS FOR MAGNETIC FLUX
         print("COMPUTE INITIAL GUESS...", end="")
-        self.phi_inner0 = self.InitialGuess()
-        self.phi_outer0 = self.phi_inner0
+        self.PHI_inner0 = self.InitialGuess()
+        self.PHI_outer0 = self.PHI_inner0
         print('Done!')
         
         # INITIALISE LEVEL-SET FUNCTION
         print("INITIALISE LEVEL-SET...", end="")
-        self.LevelSet = self.phi_inner0
+        self.LevelSet = self.PHI_inner0
+        print('Done!')
+        
+        # INITIALISE ELEMENTS 
+        print("INITIALISE ELEMENTS...", end="")
+        self.Elements = [Element(e,self.ElType,self.ElOrder,self.X[self.T[e,:],:],self.T[e,:],self.LevelSet[self.T[e,:]],self.PHI_inner0[self.T[e,:]]) for e in range(self.Ne)]
         print('Done!')
         
         # CLASSIFY ELEMENTS  ->  OBTAIN PLASMAELEMS, VACUUMELEMS, INTERELEMS
@@ -758,28 +403,20 @@ class Equili:
         
         # COMPUTE INTERFACE LINEAR APPROXIMATION
         print("APPROXIMATE INTERFACE...", end="")
-        self.ComputeInterfaceCoordinates()
+        self.ComputeInterfaceApproximation()
         print("Done!")
         
-        self.PlotSolution(self.phi_inner0)
-        
-        # COMPUTE NUMERICAL INTEGRATION ELEMENTS: NUMERICAL QUADRATURE AND SHAPE FUNCTIONS EVALUATED AT INTEGRATION NODES
-        # OBTAIN GAUSS QUADRATURE FOR NUMERICAL INTEGRATION
-        print('COMPUTE NUMERICAL INTEGRATION QUADRATURE AND SHAPE FUNCTIONS...', end="")
-        QuadratureOrder = 2
-        #### QUADRATURE TO INTEGRATE SURFACES (2D)
-        self.Zg2D, self.Wg2D, self.Ng2D = GaussQuadrature(self.ElType,QuadratureOrder)
-        #### QUADRATURE TO INTEGRATE LINES (1D)
-        self.Zg1D, self.Wg1D, self.Ng1D = GaussQuadrature(2,QuadratureOrder)
-        
-        # EVALUATE SHAPE FUNCTIONS AT GAUSS NODES
-        #### QUADRATURE TO INTEGRATE SURFACES (2D)
-        self.N, self.dNdxi, self.dNdeta = EvaluateShapeFunctions(self.ElType, self.ElOrder, self.n, self.Zg2D)
-        #### QUADRATURE TO INTEGRATE LINES (1D)
-        self.n1D = 2
-        self.N1D, self.dNdxi1D, foo = EvaluateShapeFunctions(2, QuadratureOrder-1, self.n1D, self.Zg1D)
+        # COMPUTE INTERFACE APPROXIMATION NORMALS
+        print('COMPUTE INTERFACE NORMALS...', end="")
+        self.ComputeInterfaceNormals()
         print('Done!')
         
+        # COMPUTE NUMERICAL INTEGRATION QUADRATURES
+        print('COMPUTE NUMERICAL INTEGRATION QUADRATURES...', end="")
+        self.ComputeIntegrationQuadratures()
+        print('Done!')
+        
+        self.PlotSolution(self.PHI_inner0)
         
         # START DOBLE LOOP STRUCTURE
         print('START ITERATION...')
@@ -796,7 +433,7 @@ class Equili:
                 self.SolveSystem()
                 print('OUTER ITERATION = '+str(self.it_outer)+' , INNER ITERATION = '+str(self.it_inner))
 
-                self.PlotSolution(self.phi_inner1)
+                self.PlotSolution(self.PHI_inner1)
                 
                 self.CheckConvergence("INNER")
                 
@@ -811,8 +448,8 @@ class Equili:
             phi = phi[:,0]
         plt.figure(figsize=(7,10))
         plt.tricontourf(self.X[:,0],self.X[:,1], phi, levels=30)
-        #plt.tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors='k')
-        plt.colorbar()
+        plt.tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors='k')
+        #plt.colorbar()
 
         plt.show()
         return
@@ -831,8 +468,8 @@ class Equili:
     
     def PlotMeshClassifiedElements(self):
         plt.figure(figsize=(7,10))
-        plt.tricontourf(self.X[:,0],self.X[:,1], self.phi_inner0, levels=30, cmap='plasma')
-        plt.tricontour(self.X[:,0],self.X[:,1], self.phi_inner0, levels=[0], colors='k')
+        plt.tricontourf(self.X[:,0],self.X[:,1], self.PHI_inner0, levels=30, cmap='plasma')
+        plt.tricontour(self.X[:,0],self.X[:,1], self.PHI_inner0, levels=[0], colors='k')
         #plt.colorbar()
 
         # PLOT NODES
