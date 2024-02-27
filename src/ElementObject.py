@@ -20,6 +20,7 @@ class Element:
         self.LSe = LSe                                      # ELEMENTAL NODAL LEVEL-SET VALUES
         self.PHIe = PHIe                                    # ELEMENTAL NODAL PHI VALUES
         self.Dom = None                                     # DOMAIN WHERE THE ELEMENT LIES (-1: "PLASMA"; +1: "VACUUM" ; 0: "INTERFACE")
+        self.boundarynodes = None                           # IF ELEMENT ON COMPUTATIONAL DOMAIN'S BOUNDARY, LIST OF NODES (LOCAL INDEXES) ON BOUNDARY
         
         # INTEGRATION QUADRATURES ENTITIES (1D AND 2D)
         self.Ng1D = None            # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 1D QUADRATURE

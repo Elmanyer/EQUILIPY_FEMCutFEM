@@ -16,31 +16,59 @@ class Equili:
     mu0 = 12.566370E-7           # H m-1    Magnetic permeability
     K = 1.602E-19               # J eV-1   Botlzmann constant
 
-    def __init__(self,folder_loc,ElementType,ElementOrder,CASE):
+    def __init__(self,folder_loc,ElementType,ElementOrder,CASE,QuadratureOrder):
         self.directory = folder_loc
         self.case = folder_loc[folder_loc.rfind("/")+1:]
         
-        # DECLARE ATTRIBUTES
+        # DECLARE PROBLEM ATTRIBUTES
+        self.CASE = CASE                    # CASE SOLUTION
+        self.PlasmaElems = None             # LIST OF ELEMENTS (INDEXES) INSIDE PLASMA REGION
+        self.VacuumElems = None             # LIST OF ELEMENTS (INDEXES) OUTSIDE PLASMA REGION (VACUUM REGION)
+        self.InterElems = None              # LIST OF CUT ELEMENTS (INDEXES), CONTAINING INTERFACE BETWEEN PLASMA AND VACUUM
+        self.BoundaryElems = None           # LIST OF ELEMENTS (INDEXES) ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
+        
+        # COMPUTATIONAL MESH
         self.ElType = ElementType           # TYPE OF ELEMENTS CONSTITUTING THE MESH: 1: TRIANGLES,  2: QUADRILATERALS
         self.ElOrder = ElementOrder         # ORDER OF MESH ELEMENTS: 1: LINEAR,   2: QUADRATIC
+        self.Nn = None                      # TOTAL NUMBER OF MESH NODES
+        self.Ne = None                      # TOTAL NUMBER OF MESH ELEMENTS
+        self.n = None                       # NUMBER OF NODES PER ELEMENT
+        self.dim = None                     # SPACE DIMENSION
+        self.Xmax = None                    # COMPUTATIONAL MESH MAXIMAL X (R) COORDINATE
+        self.Xmin = None                    # COMPUTATIONAL MESH MINIMAL X (R) COORDINATE
+        self.Ymax = None                    # COMPUTATIONAL MESH MAXIMAL Y (Z) COORDINATE
+        self.Ymin = None                    # COMPUTATIONAL MESH MINIMAL Y (Z) COORDINATE
+        
+        # NUMERICAL TREATMENT PARAMETERS
+        self.QuadratureOrder = QuadratureOrder   # NUMERICAL INTEGRATION QUADRATURE ORDER 
+        self.INT_TOL = None                      # INNER LOOP STRUCTURE CONVERGENCE TOLERANCE
+        self.EXT_TOL = None                      # OUTER LOOP STRUCTURE CONVERGENCE TOLERANCE
+        self.INT_ITER = None                     # INNER LOOP STRUCTURE MAXIMUM ITERATIONS NUMBER
+        self.EXT_ITER = None                     # OUTER LOOP STRUCTURE MAXIMUM ITERATIONS NUMBER
+        self.it = 0                              # TOTAL NUMBER OF ITERATIONS COUNTER
+        self.alpha = None                        # AIKTEN'S SCHEME RELAXATION CONSTANT
+        
+        # PARAMETERS FOR COILS
+        self.Ncoils = None              # TOTAL NUMBER OF COILS
+        self.Xcoils = None              # COILS' COORDINATE MATRIX 
+        self.Icoils = None              # COILS' CURRENT
+        
+        # PLASMA REGION GEOMETRY
         self.epsilon = None                 # PLASMA REGION ASPECT RATIO
         self.kappa = None                   # PLASMA REGION ELONGATION
         self.delta = None                   # PLASMA REGION TRIANGULARITY
         self.Rmax = None                    # PLASMA REGION MAJOR RADIUS
         self.Rmin = None                    # PLASMA REGION MINOR RADIUS
         self.R0 = None                      # PLASMA REGION MEAN RADIUS
-        self.QuadratureOrder = 2            # NUMERICAL INTEGRATION QUADRATURE ORDER 
-        self.TOL_inner = 1e-3               # INNER LOOP STRUCTURE CONVERGENCE TOLERANCE
-        self.TOL_outer = 1e-3               # OUTER LOOP STRUCTURE CONVERGENCE TOLERANCE
-        self.it = 0                         # ITERATIONS COUNTER
-        self.itmax = 5                      # LOOP STRUCTURES MAXIMUM ITERATIONS NUMBER
+        
         self.beta = 1e8                     # NITSCHE'S METHOD PENALTY TERM
-        self.CASE = CASE                    # CASE SOLUTION
-        self.coeffs = []                    # ANALYTICAL SOLUTION COEFFICIENTS
-
+        self.coeffs = []                    # ANALYTICAL SOLUTION/INITIAL GUESS COEFFICIENTS
+        
         return
     
     def ReadMesh(self):
+        """ Reads from input files the mesh data. """
+        
         # NUMBER OF NODES PER ELEMENT
         self.n = ElementalNumberOfNodes(self.ElType, self.ElOrder)
         
@@ -104,6 +132,83 @@ class Equili:
         file.close()
         # PYTHON INDEXES START AT 0 AND NOT AT 1. THUS, THE CONNECTIVITY MATRIX INDEXES MUST BE MODIFIED
         self.T = self.T -1
+        
+        # OBTAIN COMPUTATIONAL MESH LIMITS
+        self.Xmax = np.max(self.X[:,0])
+        self.Xmin = np.min(self.X[:,0])
+        self.Ymax = np.max(self.X[:,1])
+        self.Ymin = np.min(self.X[:,1])
+        
+        return
+    
+    def ReadEQUILIdata(self):
+        """ Reads problem data from input file equ.dat. That is:
+                - SOLUTION CASE AND PROBLEM TYPE (FIXED/FREE BOUNDARY)
+                - TOTAL CURRENT
+                - PLASMA GEOMETRY DATA
+                - LOCATION AND CURRENT OF EXTERNAL COILS CONFINING THE PLASMA
+                - PLASMA PROPERTIES
+                - NUMERICAL TREATMENT
+                """
+        
+        # READ EQU FILE .equ.dat
+        EQUILIDataFile = self.directory +'/'+ self.case +'.equ.dat'
+        self.Ncoils = 0      # number of external coils
+        self.Xcoils = None   # coordinates matrix for external coils 
+        self.Icoils = None   # Current in external coils
+        file = open(EQUILIDataFile, 'r') 
+        for line in file:
+            l = line.split(':')
+            if l[0] == '   FIXED_BOU':    # READ IF FIXED-BOUNDARY PROBLEM
+                self.FIXED_BOU = int(l[1])
+            elif l[0] == '   FREE_BOU':    # READ IF FREE-BOUNDARY PROBLEM
+                self.FREE_BOU = int(l[1])
+            elif l[0] == '   TOTAL_CURRENT':  # READ TOTAL PLASMA CURRENT
+                self.TOTAL_CURRENT = float(l[1])
+                
+            # READ PLASMA GEOMETRY PARAMETERS
+            elif l[0] == '   X_CENTRE':    # READ PLASMA REGION X_CENTER 
+                self.X_CENTRE = float(l[1])
+            elif l[0] == '   Y_CENTRE':    # READ PLASMA REGION Y_CENTER 
+                self.Y_CENTRE = float(l[1])
+            elif l[0] == '   X_MINOR':    # READ PLASMA REGION X_MINOR 
+                self.X_MINOR = float(l[1])
+            elif l[0] == '   X_MAYOR':    # READ PLASMA REGION X_MAYOR 
+                self.X_MAYOR = float(l[1])
+            elif l[0] == '   YUP_MAYOR':    # READ PLASMA REGION X_CENTER 
+                self.YUP_MAYOR = float(l[1])
+            elif l[0] == '   XYUP_MAYOR':    # READ PLASMA REGION X_CENTER 
+                self.XYUP_MAYOR = float(l[1])
+            elif l[0] == '   YDO_MAYOR':    # READ PLASMA REGION X_CENTER 
+                self.YDO_MAYOR = float(l[1])
+            elif l[0] == '   XYDO_MAYOR':    # READ PLASMA REGION X_CENTER 
+                self.XYDO_MAYOR = float(l[1])
+                
+            # READ COIL PARAMETERS
+            elif l[0] == '   N_COILS':    # READ PLASMA REGION X_CENTER 
+                self.Ncoils = int(l[1])
+                self.Xcoils = np.zeros([self.Ncoils,self.dim])
+                self.Icoils = np.zeros([self.Ncoils])
+                i = 0
+            elif l[0] == '   Xposi':    # READ i-th COIL X POSITION
+                self.Xcoils[i,0] = float(l[1])
+            elif l[0] == '   Yposi':    # READ i-th COIL Y POSITION
+                self.Xcoils[i,1] = float(l[1])
+            elif l[0] == '   Inten':    # READ i-th COIL INTENSITY
+                self.Icoils[i] = float(l[1])
+                i += 1
+                
+            # READ NUMERICAL TREATMENT PARAMETERS
+            elif l[0] == '  EXT_ITER':    # READ MAXIMAL NUMBER OF ITERATION FOR EXTERNAL LOOP
+                self.EXT_ITER = int(l[1])
+            elif l[0] == '  EXT_TOL':    # READ TOLERANCE FOR EXTERNAL LOOP
+                self.EXT_TOL = float(l[1])
+            elif l[0] == '  INT_ITER':    # READ MAXIMAL NUMBER OF ITERATION FOR INTERNAL LOOP
+                self.INT_ITER = int(l[1])
+            elif l[0] == '  INT_TOL':    # READ TOLERANCE FOR INTERNAL LOOP
+                self.INT_TOL = float(l[1])
+            elif l[0] == '  RELAXATION':   # READ AITKEN'S SCHEME RELAXATION CONSTANT
+                self.alpha = float(l[1])
         
         return
     
@@ -309,17 +414,20 @@ class Equili:
     
     
     def ClassifyElements(self):
-        """ Function that sperates the elements into 3 groups: 
+        """ Function that sperates the elements into 4 groups: 
                 - PlasmaElems: elements inside the plasma region P(phi) where the plasma current is different from 0
                 - VacuumElems: elements outside the plasma region P(phi) where the plasma current is 0
-                - InterElems: elements containing the plasma region's interface """
+                - InterElems: elements containing the plasma region's interface 
+                - BoundaryElems: elements located at the computational domain's boundary, outside the plasma region P(phi) where the plasma current is 0. """
         
         self.PlasmaElems = np.zeros([self.Ne], dtype=int)
         self.VacuumElems = np.zeros([self.Ne], dtype=int)
         self.InterElems = np.zeros([self.Ne], dtype=int)
+        self.BoundaryElems = np.zeros([self.Ne], dtype=int)
         kplasm = 0
         kvacuu = 0
         kint = 0
+        kbound = 0
                 
         for e in range(self.Ne):
             LSe = self.Elements[e].LSe  # elemental nodal level-set values
@@ -330,11 +438,27 @@ class Equili:
                     kint += 1
                     break
                 else:
-                    if i+2 == self.n:   # if all nodal values hasve the same sign
+                    if i+2 == self.n:   # if all nodal values have the same sign
                         if np.sign(LSe[i+1]) > 0:   # all nodal values with positive sign -> vacuum vessel element
-                            self.VacuumElems[kvacuu] = e
                             self.Elements[e].Dom = +1
-                            kvacuu += 1
+                            # CHECK IF VACUUM ELEMENT IS ON COMPUTATIONAL DOMAIN BOUNDARY OR NOT
+                            dl = 1e-6
+                            boundary = False
+                            self.Elements[e].boundarynodes = []
+                            for node in range(self.Elements[e].n):
+                                if ((self.Elements[e].Xe[node,0] < self.Xmax+dl and self.Xmax-dl < self.Elements[e].Xe[node,0]) or  # IF NODE ON COMPUTATIONAL MESH BOUNDARY
+                                (self.Elements[e].Xe[node,0] < self.Xmin+dl and self.Xmin-dl < self.Elements[e].Xe[node,0]) or 
+                                (self.Elements[e].Xe[node,1] < self.Ymax+dl and self.Ymax-dl < self.Elements[e].Xe[node,1]) or 
+                                (self.Elements[e].Xe[node,1] < self.Ymin+dl and self.Ymin-dl < self.Elements[e].Xe[node,1])):
+                                    self.Elements[e].boundarynodes.append(node) 
+                                    boundary = True
+                            if boundary == True: 
+                                self.BoundaryElems[kbound] = e   
+                                kbound += 1
+                            else: 
+                                self.Elements[e].boundarynodes = None        
+                                self.VacuumElems[kvacuu] = e
+                                kvacuu += 1
                         else:   # all nodal values with negative sign -> plasma region element 
                             self.PlasmaElems[kplasm] = e
                             self.Elements[e].Dom = -1
@@ -344,6 +468,7 @@ class Equili:
         self.PlasmaElems = self.PlasmaElems[:kplasm]
         self.VacuumElems = self.VacuumElems[:kvacuu]
         self.InterElems = self.InterElems[:kint]
+        self.BoundaryElems = self.BoundaryElems[:kbound]
         return
     
     
@@ -356,7 +481,7 @@ class Equili:
         return
     
     def InitialiseVariables(self):
-        self.PHI = np.zeros([self.Nn,self.itmax*self.itmax])  # All computed solutions matrix  
+        self.PHI = np.zeros([self.Nn,self.EXT_ITER*self.INT_ITER])  # All computed solutions matrix  
         self.PHI_inner0 = np.zeros([self.Nn])      # solution at inner iteration n
         self.PHI_inner1 = np.zeros([self.Nn])      # solution at inner iteration n+1
         self.PHI_outer0 = np.zeros([self.Nn])      # solution at outer iteration n
@@ -366,7 +491,7 @@ class Equili:
     
     def ComputeIntegrationQuadratures(self):
         # COMPUTE STANDARD QUADRATURE ENTITIES FOR NON-CUT ELEMENTS 
-        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems), axis=0):
+        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems, self.BoundaryElems), axis=0):
             self.Elements[elem].ComputeStandardQuadrature(self.QuadratureOrder)
             
         # COMPUTE MODIFIED QUADRATURE ENTITIES FOR INTERFACE ELEMENTS
@@ -389,6 +514,51 @@ class Equili:
         return
     
     
+    def ComputeBoundaryPHI(self):
+        
+        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B.
+        SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
+        FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
+        INTEGRATE THE PLASMA'S GREEN FUNCTION equ_funG.
+
+        IN ORDER TO SOLVE A FIXED VALUE PROBLEM INSIDE THE COMPUTATIONAL DOMAIN, THE BOUNDARY VALUES
+        PHI_B MUST COMPUTED FROM THE PREVIOUS SOLUTION FOR PHIPOL.  """
+        
+        def ellipticK(k):
+            """ COMPLETE ELLIPTIC INTEGRAL OF 1rst KIND """
+            pk=1.0-k*k
+            if k == 1:
+                ellipticK=1.0e+16
+            else:
+                AK = (((0.01451196212*pk+0.03742563713)*pk +0.03590092383)*pk+0.09666344259)*pk+1.38629436112
+                BK = (((0.00441787012*pk+0.03328355346)*pk+0.06880248576)*pk+0.12498593597)*pk+0.5
+                ellipticK = AK-BK*np.log(pk)
+            
+            return ellipticK
+
+        def ellipticE(k):
+            """COMPLETE ELLIPTIC INTEGRAL OF 2nd KIND"""
+            pk = 1 - k*k
+            if k == 1:
+                ellipticE = 1
+            else:
+                AE=(((0.01736506451*pk+0.04757383546)*pk+0.0626060122)*pk+0.44325141463)*pk+1
+                BE=(((0.00526449639*pk+0.04069697526)*pk+0.09200180037)*pk+0.2499836831)*pk
+                ellipticE = AE-BE*np.log(pk)
+            
+            return ellipticE
+        
+        def GreenFunction(Xb,Xp):
+            """ GREEN FUNCTION CORRESPONDING TO THE TOROIDAL ELLIPTIC OPERATOR """
+            kcte= np.sqrt(4*Xb[1]*Xp[1]/((Xb[1]+Xp[1])**2 + (Xp[2]-Xb[2])**2))
+            Greenfun = (1/(2*np.pi))*(np.sqrt(Xp[1]*Xb[1])/kcte)*((2-kcte**2)*ellipticK(kcte)-2*ellipticE(kcte))
+            return Greenfun
+        
+        
+        
+        return
+    
+    
     def AssembleGlobalSystem(self):
         """ This routine assembles the global matrices derived from the discretised linear system of equations used the common Galerkin approximation. 
         Nonetheless, due to the unfitted nature of the method employed, integration in cut cells (elements containing the interface between plasma region 
@@ -400,7 +570,7 @@ class Equili:
         
         # ELEMENTS INSIDE AND OUTSIDE PLASMA REGION (ELEMENTS WHICH ARE NOT CUT)
         print("     Assemble non-cut elements...", end="")
-        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems), axis=0): 
+        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems, self.BoundaryElems), axis=0): 
             # ISOLATE ELEMENT 
             ELEMENT = self.Elements[elem] 
             
@@ -474,7 +644,7 @@ class Equili:
                 L2residu = np.linalg.norm(self.PHI_inner1 - self.PHI_inner0)/np.linalg.norm(self.PHI_inner1)
             else: 
                 L2residu = np.linalg.norm(self.PHI_inner1 - self.PHI_inner0)
-            if L2residu < self.TOL_inner:
+            if L2residu < self.INT_TOL:
                 self.marker_inner = False   # STOP WHILE LOOP 
                 self.PHI_outer1 = self.PHI_inner1
             else:
@@ -487,7 +657,7 @@ class Equili:
                 L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)/np.linalg.norm(self.PHI_outer1)
             else: 
                 L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)
-            if L2residu < self.TOL_outer:
+            if L2residu < self.EXT_TOL:
                 self.marker_outer = False   # STOP WHILE LOOP 
                 self.PHI = self.PHI[:,:self.it+1]
                 self.PHI_converged = self.PHI_outer1
@@ -551,11 +721,11 @@ class Equili:
         self.marker_outer = True
         self.it_outer = 0
         self.it = 0
-        while (self.marker_outer == True and self.it_outer < self.itmax):
+        while (self.marker_outer == True and self.it_outer < self.EXT_ITER):
             self.it_outer += 1
             self.marker_inner = True
             self.it_inner = 0
-            while (self.marker_inner == True and self.it_inner < self.itmax):
+            while (self.marker_inner == True and self.it_inner < self.INT_ITER):
                 self.it_inner += 1
                 self.it += 1
                 print('OUTER ITERATION = '+str(self.it_outer)+' , INNER ITERATION = '+str(self.it_inner))
@@ -625,6 +795,11 @@ class Equili:
             for i in range(self.n):
                 plt.plot([self.X[int(Tmesh[e,i])-1,0], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,0]], 
                         [self.X[int(Tmesh[e,i])-1,1], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,1]], color='yellow', linewidth=1)
+        # PLOT BOUNDARY ELEMENTS
+        for e in self.BoundaryElems:
+            for i in range(self.n):
+                plt.plot([self.X[int(Tmesh[e,i])-1,0], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,0]], 
+                        [self.X[int(Tmesh[e,i])-1,1], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,1]], color='orange', linewidth=1)
                     
         plt.tricontour(self.X[:,0],self.X[:,1], self.LevelSet, levels=[0], colors='green',linewidths=3)
         
