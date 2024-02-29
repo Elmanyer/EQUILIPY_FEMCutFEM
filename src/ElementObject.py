@@ -9,35 +9,45 @@ class Element:
     
     def __init__(self,index,ElType,ElOrder,Xe,Te,LSe,PHIe):
         
-        self.index = index                                  # GLOBAL INDEX ON COMPUTATIONAL MESH
-        self.ElType = ElType                                # ELEMENT TYPE -> 0: SEGMENT ;  1: TRIANGLE  ; 2: QUADRILATERAL
-        self.ElOrder = ElOrder                              # ELEMENT ORDER -> 1: LINEAR ELEMENT  ;  2: QUADRATIC
-        self.n = ElementalNumberOfNodes(ElType, ElOrder)    # NUMBER OF NODES PER ELEMENT
-        self.n1D = ElOrder+1                                # NUMBER OF NODES PER EDGE
-        self.Xe = Xe                                        # ELEMENTAL NODAL MATRIX (PHYSICAL COORDINATES)
-        self.dim = len(Xe[0,:])                             # SPATIAL DIMENSION
-        self.Te = Te                                        # ELEMENTAL CONNECTIVITIES
-        self.LSe = LSe                                      # ELEMENTAL NODAL LEVEL-SET VALUES
-        self.PHIe = PHIe                                    # ELEMENTAL NODAL PHI VALUES
-        self.Dom = None                                     # DOMAIN WHERE THE ELEMENT LIES (-1: "PLASMA"; +1: "VACUUM" ; 0: "INTERFACE")
-        self.boundarynodes = None                           # IF ELEMENT ON COMPUTATIONAL DOMAIN'S BOUNDARY, LIST OF NODES (LOCAL INDEXES) ON BOUNDARY
+        self.index = index                                              # GLOBAL INDEX ON COMPUTATIONAL MESH
+        self.ElType = ElType                                            # ELEMENT TYPE -> 0: SEGMENT ;  1: TRIANGLE  ; 2: QUADRILATERAL
+        self.ElOrder = ElOrder                                          # ELEMENT ORDER -> 1: LINEAR ELEMENT  ;  2: QUADRATIC
+        self.n, self.nedge = ElementalNumberOfNodes(ElType, ElOrder)    # NUMBER OF NODES PER ELEMENT, PER ELEMENTAL EDGE
+        self.Xe = Xe                                                    # ELEMENTAL NODAL MATRIX (PHYSICAL COORDINATES)
+        self.dim = len(Xe[0,:])                                         # SPATIAL DIMENSION
+        self.Te = Te                                                    # ELEMENTAL CONNECTIVITIES
+        self.LSe = LSe                                                  # ELEMENTAL NODAL LEVEL-SET VALUES
+        self.PHIe = PHIe                                                # ELEMENTAL NODAL PHI VALUES
+        self.Dom = None                                                 # DOMAIN WHERE THE ELEMENT LIES (-1: "PLASMA"; +1: "VACUUM" ; 0: "INTERFACE")
         
         # INTEGRATION QUADRATURES ENTITIES (1D AND 2D)
         self.Ng1D = None            # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 1D QUADRATURE
         self.XIg1D = None           # STANDARD 1D GAUSS INTEGRATION NODES 
-        self.Wg1D = None            # STANDARD 1D GAUSS INTEGRATION WEIGTHS
-        self.N1D = None             # REFERENCE 1D SHAPE FUNCTIONS EVALUATED AT STANDARD 1D GAUSS INTEGRATION NODES 
-        self.dNdxi1D = None         # REFERENCE 1D SHAPE FUNCTIONS DERIVATIVES EVALUATED AT STANDARD 1D GAUSS INTEGRATION NODES 
+        self.Wg1D = None            # STANDARD 1D GAUSS INTEGRATION WEIGTHS 
         self.Ng2D = None            # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 2D GAUSS QUADRATURE
         self.XIg2D = None           # STANDARD 2D GAUSS INTEGRATION NODES 
         self.Wg2D = None            # STANDARD 2D GAUSS INTEGRATION WEIGTHS
-        self.Xg1D = None            # PHYSICAL GAUSS INTEGRATION NODES MAPPED FROM 1D REFERENCE ELEMENT
         self.N = None               # REFERENCE 2D SHAPE FUNCTIONS EVALUATED AT STANDARD 2D GAUSS INTEGRATION NODES 
         self.dNdxi = None           # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT STANDARD 2D GAUSS INTEGRATION NODES
         self.dNdeta = None          # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO ETA EVALUATED AT STANDARD 2D GAUSS INTEGRATION NODES
         self.Xg2D = None            # PHYSICAL GAUSS INTEGRATION NODES MAPPED FROM 2D REFERENCE ELEMENT
         self.invJg = None           # INVERSE MATRIX OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT, EVALUATED AT GAUSS INTEGRATION NODES
         self.detJg = None           # MATRIX DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT, EVALUATED AT GAUSS INTEGRATION NODES 
+        
+        ### ATRIBUTES FOR INTERFACE AND BOUNDARY ELEMENTS
+        self.NormalVec = None       # INTERFACE/BOUNDARY EDGE NORMAL VECTOR POINTING OUTWARDS
+        
+        ### ATTRIBUTES FOR BOUNDARY ELEMENTS
+        self.PHI_Be = None           # PHI VALUE ON BOUNDARY EDGES NODES
+        self.Nebound = None          # NUMBER OF ELEMENTAL EDGES ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
+        self.Tebound = None          # BOUNDARY EDGES CONNECTIVITY MATRIX (LOCAL INDEXES) 
+        self.boundary = None         # GLOBAL INDEX FOR COMPUTATIONAL DOMAIN'S BOUNDARY ELEMENTAL EDGE
+        self.XIgbound = None         # GAUSS INTEGRATION NODES ON BOUNDARY EDGE 
+        self.Nbound = None           # REFERENCE 2D SHAPE FUNCTIONS EVALUATED BOUNDARY EDGE GAUSS INTEGRATION NODES
+        self.dNdxibound = None       # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED BOUNDARY EDGE GAUSS INTEGRATION NODES
+        self.dNdetabound = None      # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO ETA EVALUATED BOUNDARY EDGE GAUSS INTEGRATION NODES
+        self.Xgbound = None          # PHYSICAL 2D GAUSS INTEGRATION NODES MAPPED ON BOUNDARY EDGE
+        self.detJgbound = None       # MATRIX DETERMINANTS OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL BOUNDARY EDGE EVALUATED AT GAUSS INTEGRATION NODES 
         
         ### ATTRIBUTES FOR INTERFACE ELEMENTS
         self.interface = None       # INTERFACE GLOBAL INDEX
@@ -46,9 +56,7 @@ class Element:
         self.Nsub = None            # NUMBER OF SUBELEMENTS GENERATED IN TESSELLATION
         self.Xemod = None           # MODIFIED ELEMENTAL NODAL MATRIX (PHYSICAL COORDINATES)
         self.Temod = None           # MODIFIED CONNECTIVITY MATRIX FOR TESSELLED INTERFACE PHYSICAL ELEMENT
-        self.NormalVec = None       # INTERFACE NORMAL VECTOR POINTING OUTWARDS
-        
-        # MODIFIED INTEGRATION QUADRATURE FOR INTERFACE (1D INTEGRATION)
+        # MODIFIED QUADRATURE FOR INTEGRATION ALONG INTERFACE 
         self.XIgint = None       # MODIFIED GAUSS INTEGRATION NODES COMPUTED FROM 1D STANDARD QUADRATURE 
         self.Nint = None         # REFERENCE 2D SHAPE FUNCTIONS EVALUATED AT MODIFIED 1D GAUSS INTEGRATION NODES 
         self.Xgint = None        # PHYSICAL 2D GAUSS INTEGRATION NODES MAPPED FROM 1D REFERENCE ELEMENT
@@ -301,18 +309,113 @@ class Element:
             return XeTESS, TeTESS
         
         
-    def ComputeStandardQuadrature(self,Order):
-        """ This function computes the NUMERICAL INTEGRATION QUADRATURES corresponding to integrations in 2D and 1D for elements which ARE NOT CUT by the interface. Hence, 
+    def FindBoundaryEdges(self,Tbound):
+        """ This function finds the edges lying on the computational domain's boundary, for an element on the boundary. The different elemental attributes are set-up accordingly.
+        
+        Input: - Tbound: # MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
+        
+        Relevant attributes: 
+            #   Nebound: NUMBER OF BOUNDARY EDGES IN ELEMENT
+            #   Tebound: BOUNDARY EDGES CONNECTIVITY MATRIX (LOCAL INDEXES) 
+                """
+        
+        # LOOK WHICH BOUNDARIES ARE ASSOCIATED TO THE ELEMENT
+        self.boundary = np.where(Tbound[:,-1] == self.index)[0] 
+        self.Nebound = len(self.boundary)
+        self.Tebound = np.zeros([self.Nebound,self.nedge], dtype=int)
+        for boundedge, index in enumerate(self.boundary):
+            for i in range(self.nedge):
+                self.Tebound[boundedge,i] = np.where(Tbound[index,i] == self.Te)[0][0]
+        return
+    
+    
+    def ComputeElementalPHI_B(self,Elements,PlasmaElements,InterElements,Jphi,Ncoils,Xcoils,Icoils):
+        
+        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B, ON BOUNDARY ELEMENT. 
+        THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
+        SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
+        FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
+        INTEGRATE THE PLASMA'S GREEN FUNCTION."""
+        
+        def ellipticK(k):
+            """ COMPLETE ELLIPTIC INTEGRAL OF 1rst KIND """
+            pk=1.0-k*k
+            if k == 1:
+                ellipticK=1.0e+16
+            else:
+                AK = (((0.01451196212*pk+0.03742563713)*pk +0.03590092383)*pk+0.09666344259)*pk+1.38629436112
+                BK = (((0.00441787012*pk+0.03328355346)*pk+0.06880248576)*pk+0.12498593597)*pk+0.5
+                ellipticK = AK-BK*np.log(pk)
+            
+            return ellipticK
+
+        def ellipticE(k):
+            """COMPLETE ELLIPTIC INTEGRAL OF 2nd KIND"""
+            pk = 1 - k*k
+            if k == 1:
+                ellipticE = 1
+            else:
+                AE=(((0.01736506451*pk+0.04757383546)*pk+0.0626060122)*pk+0.44325141463)*pk+1
+                BE=(((0.00526449639*pk+0.04069697526)*pk+0.09200180037)*pk+0.2499836831)*pk
+                ellipticE = AE-BE*np.log(pk)
+            
+            return ellipticE
+        
+        def GreenFunction(Xb,Xp):
+            """ GREEN FUNCTION CORRESPONDING TO THE TOROIDAL ELLIPTIC OPERATOR """
+            kcte= np.sqrt(4*Xb[0]*Xp[0]/((Xb[0]+Xp[0])**2 + (Xp[1]-Xb[1])**2))
+            Greenfun = (1/(2*np.pi))*(np.sqrt(Xp[1]*Xb[1])/kcte)*((2-kcte**2)*ellipticK(kcte)-2*ellipticE(kcte))
+            return Greenfun
+        
+        self.PHI_Be = np.zeros([self.Nebound,self.nedge])
+        
+        # COMPUTE VALUES OF PHI ON EACH BOUNDARY 
+        for i in range(self.Nebound):
+            # COMPUTE VALUES OF PHI ON EACH NODE
+            for j in range(self.nedge):
+                # ISOLATE NODAL COORDINATES
+                Xnode = self.Xe[self.Tebound[i,j],:]
+                # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
+                for icoil in range(Ncoils): 
+                    self.PHI_Be[i,j] += Icoils[icoil] * GreenFunction(Xnode,Xcoils[icoil,:]) 
+                    
+                # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
+                #   1. INTEGRATE IN PLASMA ELEMENTS
+                for elem in PlasmaElements:
+                    # ISOLATE ELEMENT OBJECT
+                    ELEMENT = Elements[elem]
+                    # INTERPOLATE ELEMENTAL PHI ON PHYSICAL GAUSS NODES
+                    PHIg = ELEMENT.N @ ELEMENT.PHIe
+                    # LOOP OVER GAUSS NODES
+                    for ig in range(ELEMENT.Ng2D):
+                        for k in range(ELEMENT.n):
+                            self.PHI_Be[i,j] += GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
+                                                                    PHIg[ig])*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]*ELEMENT.N[ig,k]
+                            
+                #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
+                for elem in InterElements:
+                    # ISOLATE ELEMENT OBJECT
+                    ELEMENT = Elements[elem]
+                    # INTEGRATE ON SUBELEMENT IN PLASMA REGION
+                    for SUBELEM in ELEMENT.SubElements:
+                        if SUBELEM.Dom < 0:  # IN PLASMA REGION
+                            # INTERPOLATE ELEMENTAL PHI ON PHYSICAL GAUSS NODES
+                            PHIg = SUBELEM.N @ ELEMENT.PHIe
+                            # LOOP OVER GAUSS NODES
+                            for ig in range(SUBELEM.Ng2D):
+                                for k in range(SUBELEM.n):
+                                    self.PHI_Be[i,j] += GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
+                                                                    PHIg[ig])*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*SUBELEM.N[ig,k]
+                                    
+        return
+        
+        
+    def ComputeStandardQuadrature2D(self,Order):
+        """ This function computes the NUMERICAL INTEGRATION QUADRATURES corresponding to integrations in 2D for elements which ARE NOT CUT by the interface. Hence, 
         in such elements the standard FEM integration methodology is applied (STANDARD REFERENCE SHAPE FUNCTIONS EVALUATED AT STANDARD GAUSS INTEGRATION NODES). 
         Input: - Order: Gauss quadrature order 
         
-        Relevant quantities:
-            ### 1D REFERENCE ELEMENT:
-            #   Xig1D: GAUSS NODAL COORDINATES IN 1D REFERENCE ELEMENT
-            #   Wg1D: GAUSS WEIGHTS IN 1D REFERENCE ELEMENT
-            #   Ng1D: NUMBER OF GAUSS INTEGRATION NODES IN 1D REFERENCE QUADRATURE
-            #   N1D: 1D REFERENCE SHAPE FUNCTIONS EVALUATED AT 1D REFERENCE GAUSS INTEGRATION NODES
-            #   dNdxi1D: 1D REFERENCE SHAPE FUNCTIONS DERIVATIVES EVALUATED AT 1D REFERENCE GAUSS INTEGRATION NODES
+        Relevant attributes:
             ### 2D REFERENCE ELEMENT:
             #   Xig2D: GAUSS NODAL COORDINATES IN 2D REFERENCE ELEMENT
             #   Wg2D: GAUSS WEIGHTS IN 2D REFERENCE ELEMENT
@@ -322,17 +425,13 @@ class Element:
             #   dNdeta: 2D REFERENCE SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT 2D REFERENCE GAUSS INTEGRATION NODES
             """
         
-        # COMPUTE THE STANDARD QUADRATURE ON THE REFERENCE SPACE, FOR BOTH 1D AND 2D
-        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE SURFACES (2D)
+        # COMPUTE THE STANDARD QUADRATURE ON THE REFERENCE SPACE IN 2D
+        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE SURFACES 
         self.XIg2D, self.Wg2D, self.Ng2D = GaussQuadrature(self.ElType,Order)
-        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
-        self.XIg1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,Order)
         
         # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
         # EVALUATE REFERENCE SHAPE FUNCTIONS 
         self.N, self.dNdxi, self.dNdeta = EvaluateReferenceShapeFunctions(self.XIg2D, self.ElType, self.ElOrder, self.n)
-        #### QUADRATURE TO INTEGRATE LINES (1D)
-        self.N1D, self.dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.XIg1D, 0, Order-1, self.n1D)
         
         # PRECOMPUTE THE NECESSARY INTEGRATION ENTITIES EVALUATED AT THE STANDARD GAUSS INTEGRATION NODES ->> STANDARD FEM APPROACH
         # WE COMPUTE THUS:
@@ -349,15 +448,67 @@ class Element:
         for ig in range(self.Ng2D):
             self.invJg[ig,:,:], self.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],self.dNdxi[ig,:],self.dNdeta[ig,:])
             self.detJg[ig] *= 2*np.pi*Rmean   # ACCOUNT FOR AXISYMMETRICAL
+            
+        return    
+            
+    def ComputeBoundaryQuadrature(self, Order):       
+        """ This function computes the NUMERICAL INTEGRATION QUADRATURES corresponding to integrations in 1D for elements which ARE NOT CUT by the interface. Hence, 
+        in such elements the standard FEM integration methodology is applied (STANDARD REFERENCE SHAPE FUNCTIONS EVALUATED AT STANDARD GAUSS INTEGRATION NODES). 
+        Input: - Order: Gauss quadrature order 
         
+        ### 1D REFERENCE ELEMENT:
+            #   Xig1D: GAUSS NODAL COORDINATES IN 1D REFERENCE ELEMENT
+            #   Wg1D: GAUSS WEIGHTS IN 1D REFERENCE ELEMENT
+            #   Ng1D: NUMBER OF GAUSS INTEGRATION NODES IN 1D REFERENCE QUADRATURE
+            #   N1D: 1D REFERENCE SHAPE FUNCTIONS EVALUATED AT 1D REFERENCE GAUSS INTEGRATION NODES
+            #   dNdxi1D: 1D REFERENCE SHAPE FUNCTIONS DERIVATIVES EVALUATED AT 1D REFERENCE GAUSS INTEGRATION NODES
+        """   
+         
+        # COMPUTE THE STANDARD QUADRATURE ON THE REFERENCE SPACE IN 1D
+        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
+        self.XIg1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,Order)
+        # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
+        #### QUADRATURE TO INTEGRATE LINES (1D)
+        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.XIg1D, 0, Order-1, self.nedge)
+        
+        # PRECOMPUTE THE NECESSARY INTEGRATION ENTITIES EVALUATED AT THE STANDARD GAUSS INTEGRATION NODES ->> STANDARD FEM APPROACH
+        # WE COMPUTE THUS:
+        #       - THE JACOBIAN OF THE TRANSFORMATION BETWEEN REFERENCE AND PHYSICAL 1D SPACES MATRIX DETERMINANT
+        #       - THE STANDARD PHYSICAL GAUSS INTEGRATION NODES MAPPED FROM THE REFERENCE 1D ELEMENT
+          
+        self.XIgbound = np.zeros([self.Nebound,self.Ng1D,self.dim])
+        self.Nbound = np.zeros([self.Nebound,self.Ng1D,self.n])
+        self.dNdxibound = np.zeros([self.Nebound,self.Ng1D,self.n])
+        self.dNdetabound = np.zeros([self.Nebound,self.Ng1D,self.n])
+        self.Xgbound = np.zeros([self.Nebound,self.Ng1D,self.dim])
+        self.detJgbound = np.zeros([self.Nebound,self.Ng1D])
+        for edge in range(self.Nebound):
+            # ISOLATE EDGE NODAL COORDINATES
+            Xebound = self.Xe[self.Tebound[edge,:],:]
+            # IDENTIFY EDGE ON REFERENCE ELEMENT CORRESPONDING TO BOUNDARY EDGE
+            XIbound = np.zeros(np.shape(Xebound))
+            for i in range(len(Xebound[:,0])):
+                XIbound = self.InverseMapping(Xebound[i,:])
+            # MAP 1D REFERENCE STANDARD GAUSS INTEGRATION NODES ON REFERENCE BOUNDARY EDGE 
+            self.XIgbound[edge,:,:] = N1D @ XIbound
+            # EVALUATE 2D REFERENCE SHAPE FUNCTION ON REFERENCE BOUNDARY EDGE GAUSS NODES
+            self.Nbound[edge,:,:], self.dNdxibound[edge,:,:], self.dNdetabound[edge,:,:] = EvaluateReferenceShapeFunctions(self.XIgbound[edge,:,:], self.ElType, self.ElOrder, self.n)
+            # COMPUTE MAPPED GAUSS NODES
+            self.Xgbound[edge,:,:] = N1D @ Xebound
+            # COMPUTE JACOBIAN INVERSE AND DETERMINANT
+            Rmeanbound = np.mean(Xebound[:,0])   # mean elemental radial position
+            for ig in range(self.Ng1D):
+                self.detJgbound[edge,ig] = Jacobian1D(Xebound[:,0],Xebound[:,1],dNdxi1D[ig,:])  
+                self.detJgbound[edge,ig] *= 2*np.pi*Rmeanbound   # ACCOUNT FOR AXISYMMETRICAL
+                
         return
     
     
-    def ComputeModifiedQuadrature(self,Order):
+    def ComputeModifiedQuadratures(self,Order):
         """ This function computes the NUMERICAL INTEGRATION QUADRATURES corresponding to a 2D and 1D integration for elements which ARE CUT by the interface. 
         In this case, an adapted quadrature is computed by modifying the standard approach.  
         
-        Relevant quantities:
+        Relevant attributes:
             ### 1D REFERENCE ELEMENT:
             #   XIg1D: STANDARD GAUSS INTEGRATION NODES IN 1D REFERENCE ELEMENT
             #   Wg1D: STANDARD GAUSS INTEGRATION WEIGHTS IN 1D REFERENCE ELEMENT
@@ -395,7 +546,7 @@ class Element:
         # EVALUATE REFERENCE SHAPE FUNCTIONS 
         N, foo, foo = EvaluateReferenceShapeFunctions(XIg2DFEM, self.ElType, self.ElOrder, self.n)
         #### QUADRATURE TO INTEGRATE LINES (1D)
-        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1DFEM, 0, Order-1, self.n1D)
+        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1DFEM, 0, Order-1, self.nedge)
         
         #### THE STANDARD APPROACH IS MODIFIED THEN ACCORDING TO THE INTERFACE IN ORDER TO GENERATE A NEW ADAPTED QUADRATURE
         ## THE FOLLOWING METHODOLOGY IS FOLLOWED: IN ORDER TO INTERGRATE IN THE CUT ELEMENT, THE ORIGINAL PHYSICAL ELEMENT IS 
@@ -463,10 +614,10 @@ class Element:
         self.Xgint = N1D @ self.Xeint
         
         self.detJgint = np.zeros([self.Ng1D])
-        Rmean = np.sum(self.Xe[:,0])/self.n   # mean elemental radial position
+        Rmeanint = np.mean(self.Xeint[:,0])   # mean interface radial position
         for ig in range(self.Ng1D):
             self.detJgint[ig] = Jacobian1D(self.Xeint[:,0],self.Xeint[:,1],dNdxi1D[ig,:])  
-            self.detJgint[ig] *= 2*np.pi*Rmean   # ACCOUNT FOR AXISYMMETRICAL
+            self.detJgint[ig] *= 2*np.pi*Rmeanint   # ACCOUNT FOR AXISYMMETRICAL
             
         return 
     
@@ -491,8 +642,27 @@ class Element:
             self.NormalVec = ntest
         else:   # TEST POINT INSIDE PLASMA REGION --> NEED TO TAKE THE OPPOSITE NORMAL VECTOR
             self.NormalVec = -1*ntest
-        
         return 
+    
+    def BoundaryNormal(self,Xmax,Xmin,Ymax,Ymin):
+        """ This function computes the boundary edge(s) normal vector(s) pointing outwards. """
+        
+        self.NormalVec = np.zeros([self.Nebound,self.dim])
+        for edge in range(self.Nebound):
+            dx = self.Xe[self.Tebound[edge,1],0] - self.Xe[self.Tebound[edge,0],0]
+            dy = self.Xe[self.Tebound[edge,1],1] - self.Xe[self.Tebound[edge,0],1]
+            ntest = np.array([-dy, dx])   # test this normal vector
+            ntest = ntest/np.linalg.norm(ntest)   # normalize
+            Xintmean = np.array([np.mean(self.Xe[self.Tebound[edge,:],0]), np.mean(self.Xe[self.Tebound[edge,:],1])])  # mean point on interface
+            Xtest = Xintmean + 2*ntest  # physical point on which to test if outside of computational domain 
+            
+            # CHECK IF TEST POINT IS OUTSIDE COMPUTATIONAL DOMAIN
+            if Xtest[0] < Xmin or Xmax < Xtest[0] or Xtest[1] < Ymin or Ymax < Xtest[1]:  
+                self.NormalVec[edge,:] = ntest
+            else: 
+                self.NormalVec[edge,:] = -1*ntest
+        
+        return
     
     
     def IntegrateElementalDomainTerms(self,SourceTermg,LHS,RHS):
@@ -545,14 +715,44 @@ class Element:
                 ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
                 RHS[self.Te[i]] +=  beta * PHI_Dg[ig] * self.Nint[ig,i] * self.detJgint[ig] * self.Wg1D[ig]
         return 
+    
+    
+    def IntegrateElementalBoundaryTerms(self,PHI_Bg,beta,LHS,RHS):
+        """ Input: - PHI_Bg: Boundary condition, evaluated at physical gauss integration nodes
+                   - beta: Nitsche's method penalty parameter
+                   - LHS: global system Left-Hand-Side matrix 
+                   - RHS: global system Reft-Hand-Side vector 
+                    """
+
+        # LOOP OVER EDGES ON COMPUTATIONAL DOMAIN'S BOUNDARY
+        for edge in range(self.Nebound):
+            # LOOP OVER GAUSS INTEGRATION NODES
+            for ig in range(self.Ng1D):  
+                # SHAPE FUNCTIONS GRADIENT
+                Ngrad = np.array([self.dNdxibound[edge,ig,:],self.dNdetabound[edge,ig,:]])
+                # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
+                for i in range(self.n):  # ROWS ELEMENTAL MATRIX
+                    for j in range(self.n):  # COLUMNS ELEMENTAL MATRIX
+                        # COMPUTE LHS MATRIX TERMS
+                        ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
+                        LHS[self.Te[i],self.Te[j]] += self.Nbound[edge,ig,i] * self.NormalVec[edge,:] @ Ngrad[:,j] * self.detJgbound[edge,ig] * self.Wg1D[ig]
+                        ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
+                        LHS[self.Te[i],self.Te[j]] += self.NormalVec[edge,:] @ Ngrad[:,i]*(self.Nbound[edge,ig,j] * self.detJgbound[edge,ig] * self.Wg1D[ig])
+                        ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
+                        LHS[self.Te[i],self.Te[j]] += beta * self.Nbound[edge,ig,i] * self.Nbound[edge,ig,j] * self.detJgbound[edge,ig] * self.Wg1D[ig]
+                    # COMPUTE RHS VECTOR TERMS 
+                    ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
+                    RHS[self.Te[i]] +=  PHI_Bg[edge,ig] * self.NormalVec[edge,:] @ Ngrad[:,i] * self.detJgbound[edge,ig] * self.Wg1D[ig]
+                    ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
+                    RHS[self.Te[i]] +=  beta * PHI_Bg[edge,ig] * self.Nbound[edge,ig,i] * self.detJgbound[edge,ig] * self.Wg1D[ig]
+        return 
         
     
 def ElementalNumberOfNodes(elemType, elemOrder):
     # ELEMENT TYPE -> 0: SEGMENT ;  1: TRIANGLE  ; 2: QUADRILATERAL
     match elemType:
         case 0:
-            n = elemOrder +1
-                
+            n = elemOrder +1        
         case 1:
             match elemOrder:
                 case 1:
@@ -569,5 +769,6 @@ def ElementalNumberOfNodes(elemType, elemOrder):
                     n = 9
                 case 3:
                     n = 16
-    return n
+    nedge = elemOrder + 1
+    return n, nedge
     

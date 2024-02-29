@@ -30,10 +30,17 @@ class Equili:
         # COMPUTATIONAL MESH
         self.ElType = ElementType           # TYPE OF ELEMENTS CONSTITUTING THE MESH: 1: TRIANGLES,  2: QUADRILATERALS
         self.ElOrder = ElementOrder         # ORDER OF MESH ELEMENTS: 1: LINEAR,   2: QUADRATIC
+        self.X = None                       # MESH NODAL COORDINATES MATRIX
+        self.T = None                       # MESH ELEMENTS CONNECTIVITY MATRIX 
         self.Nn = None                      # TOTAL NUMBER OF MESH NODES
         self.Ne = None                      # TOTAL NUMBER OF MESH ELEMENTS
         self.n = None                       # NUMBER OF NODES PER ELEMENT
+        self.nedge = None                   # NUMBER OF NODES ON ELEMENT EDGE
         self.dim = None                     # SPACE DIMENSION
+        self.Tbound = None                  # MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
+        self.Nbound = None                  # NUMBER OF COMPUTATIONAL DOMAIN'S BOUNDARIES (NUMBER OF ELEMENTAL EDGES)
+        self.Nnbound = None                 # NUMBER OF NODES ON COMPUTATIONAL DOMAIN'S BOUNDARY
+        self.BoundaryNodes = None           # LIST OF NODES (GLOBAL INDEXES) ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
         self.Xmax = None                    # COMPUTATIONAL MESH MAXIMAL X (R) COORDINATE
         self.Xmin = None                    # COMPUTATIONAL MESH MINIMAL X (R) COORDINATE
         self.Ymax = None                    # COMPUTATIONAL MESH MAXIMAL Y (Z) COORDINATE
@@ -70,7 +77,7 @@ class Equili:
         """ Reads from input files the mesh data. """
         
         # NUMBER OF NODES PER ELEMENT
-        self.n = ElementalNumberOfNodes(self.ElType, self.ElOrder)
+        self.n, self.nedge = ElementalNumberOfNodes(self.ElType, self.ElOrder)
         
         # READ DOM FILE .dom.dat
         MeshDataFile = self.directory +'/'+ self.case +'.dom.dat'
@@ -93,45 +100,69 @@ class Equili:
         MeshFile = self.directory +'/'+ self.case +'.geo.dat'
         self.T = np.zeros([self.Ne,self.n], dtype = int)
         self.X = np.zeros([self.Nn,self.dim], dtype = float)
+        self.Tbound = np.zeros([self.Nbound,self.nedge+1], dtype = int)   # LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE 
         file = open(MeshFile, 'r') 
         i = -1
         j = -1
+        k = -1
         for line in file:
             # first we format the line read in order to remove all the '\n'  
             l = line.split(' ')
-            l = [k for k in l if k != '']
+            l = [m for m in l if m != '']
             for e, el in enumerate(l):
                 if el == '\n':
                     l.remove('\n') 
                 elif el[-1:]=='\n':
                     l[e]=el[:-1]
-            # We identify when the connectivity information starts
+            # WE IDENTIFY WHEN THE CONNECTIVITY MATRIX DATA STARTS
             if l[0] == 'ELEMENTS':
                 i=0
                 continue
-            # We identify when the connectivity information ends
+            # WE IDENTIFY WHEN THE CONNECTIVITY MATRIX DATA ENDS
             elif l[0] == 'END_ELEMENTS':
                 i=-1
                 continue
-            # We identify when the coordinates information starts
+            # WE IDENTIFY WHEN THE NODAL COORDINATES DATA STARTS
             elif l[0] == 'COORDINATES':
                 j=0
                 continue
-            # We identify when the coordinates information ends
+            # WE IDENTIFY WHEN THE NODAL COORDINATES DATA ENDS
             elif l[0] == 'END_COORDINATES':
                 j=-1
                 continue
+            # WE IDENTIFY WHEN THE COMPUTATIONAL DOMAIN'S BOUNDARY DATA STARTS
+            elif l[0] == 'BOUNDARIES,':
+                k=0
+                continue
+            # WE IDENTIFY WHEN THE COMPUTATIONAL DOMAIN'S BOUNDARY DATA ENDS
+            elif l[0] == 'END_BOUNDARIES':
+                k=-1
+                continue
             if i>=0:
-                for k in range(self.n):
-                    self.T[i,k] = int(l[k+1])
+                for m in range(self.n):
+                    self.T[i,m] = int(l[m+1])
                 i += 1
             if j>=0:
-                for k in range(self.dim):
-                    self.X[j,k] = float(l[k+1])
+                for m in range(self.dim):
+                    self.X[j,m] = float(l[m+1])
                 j += 1
+            if k>=0:
+                for m in range(self.nedge+1):
+                    self.Tbound[k,m] = float(l[m+1])
+                k += 1
         file.close()
         # PYTHON INDEXES START AT 0 AND NOT AT 1. THUS, THE CONNECTIVITY MATRIX INDEXES MUST BE MODIFIED
-        self.T = self.T -1
+        self.T = self.T - 1
+        self.Tbound = self.Tbound - 1
+        
+        # OBTAIN BOUNDARY NODES
+        self.BoundaryNodes = set()     # GLOBAL INDEXES OF NODES ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
+        for i in range(self.nedge):
+            for node in self.Tbound[:,i]:
+                self.BoundaryNodes.add(node)
+        # CONVERT BOUNDARY NODES SET INTO ARRAY
+        self.BoundaryNodes = np.array(sorted(self.BoundaryNodes))
+        self.Nnbound = len(self.BoundaryNodes)
         
         # OBTAIN COMPUTATIONAL MESH LIMITS
         self.Xmax = np.max(self.X[:,0])
@@ -420,64 +451,90 @@ class Equili:
                 - InterElems: elements containing the plasma region's interface 
                 - BoundaryElems: elements located at the computational domain's boundary, outside the plasma region P(phi) where the plasma current is 0. """
         
-        self.PlasmaElems = np.zeros([self.Ne], dtype=int)
-        self.VacuumElems = np.zeros([self.Ne], dtype=int)
-        self.InterElems = np.zeros([self.Ne], dtype=int)
-        self.BoundaryElems = np.zeros([self.Ne], dtype=int)
+        self.PlasmaElems = np.zeros([self.Ne], dtype=int)    # GLOBAL INDEXES OF ELEMENTS INSIDE PLASMA REGION
+        self.VacuumElems = np.zeros([self.Ne], dtype=int)    # GLOBAL INDEXES OF ELEMENTS OUTSIDE PLASMA REGION (VACUUM REGION)
+        self.InterElems = np.zeros([self.Ne], dtype=int)     # GLOBAL INDEXES OF CUT ELEMENTS, CONTAINING INTERFACE BETWEEN PLASMA AND VACUUM 
+        self.BoundaryElems = np.zeros([self.Ne], dtype=int)  # GLOBAL INDEXES OF ELEMENTS ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
         kplasm = 0
         kvacuu = 0
         kint = 0
         kbound = 0
-                
+        
         for e in range(self.Ne):
-            LSe = self.Elements[e].LSe  # elemental nodal level-set values
-            for i in range(self.n-1):
-                if np.sign(LSe[i]) !=  np.sign(LSe[i+1]):  # if the sign between nodal values change -> interface element
-                    self.InterElems[kint] = e
-                    self.Elements[e].Dom = 0
-                    kint += 1
-                    break
-                else:
-                    if i+2 == self.n:   # if all nodal values have the same sign
-                        if np.sign(LSe[i+1]) > 0:   # all nodal values with positive sign -> vacuum vessel element
-                            self.Elements[e].Dom = +1
-                            # CHECK IF VACUUM ELEMENT IS ON COMPUTATIONAL DOMAIN BOUNDARY OR NOT
-                            dl = 1e-6
-                            boundary = False
-                            self.Elements[e].boundarynodes = []
-                            for node in range(self.Elements[e].n):
-                                if ((self.Elements[e].Xe[node,0] < self.Xmax+dl and self.Xmax-dl < self.Elements[e].Xe[node,0]) or  # IF NODE ON COMPUTATIONAL MESH BOUNDARY
-                                (self.Elements[e].Xe[node,0] < self.Xmin+dl and self.Xmin-dl < self.Elements[e].Xe[node,0]) or 
-                                (self.Elements[e].Xe[node,1] < self.Ymax+dl and self.Ymax-dl < self.Elements[e].Xe[node,1]) or 
-                                (self.Elements[e].Xe[node,1] < self.Ymin+dl and self.Ymin-dl < self.Elements[e].Xe[node,1])):
-                                    self.Elements[e].boundarynodes.append(node) 
-                                    boundary = True
-                            if boundary == True: 
-                                self.BoundaryElems[kbound] = e   
-                                kbound += 1
-                            else: 
-                                self.Elements[e].boundarynodes = None        
+            # WE FIRST EXTRACT THE LIST OF BOUNDARY ELEMENTS THANKS TO THE CONNECTIVITY MATRIX Tbound OBTAINED FROM THE MESH INPUT FILE DATA
+            if e in self.Tbound[:,-1]:
+                self.BoundaryElems[kbound] = e
+                self.Elements[e].Dom = +1
+                kbound += 1
+            else:
+                LSe = self.Elements[e].LSe  # elemental nodal level-set values
+                for i in range(self.n-1):
+                    if np.sign(LSe[i]) !=  np.sign(LSe[i+1]):  # if the sign between nodal values change -> interface element
+                        self.InterElems[kint] = e
+                        self.Elements[e].Dom = 0
+                        kint += 1
+                        break
+                    else:
+                        if i+2 == self.n:   # if all nodal values have the same sign
+                            if np.sign(LSe[i+1]) > 0:   # all nodal values with positive sign -> vacuum vessel element
+                                self.Elements[e].Dom = +1
                                 self.VacuumElems[kvacuu] = e
                                 kvacuu += 1
-                        else:   # all nodal values with negative sign -> plasma region element 
-                            self.PlasmaElems[kplasm] = e
-                            self.Elements[e].Dom = -1
-                            kplasm += 1
+                            else:   # all nodal values with negative sign -> plasma region element 
+                                self.PlasmaElems[kplasm] = e
+                                self.Elements[e].Dom = -1
+                                kplasm += 1
                             
         # DELETE REST OF UNUSED MEMORY
         self.PlasmaElems = self.PlasmaElems[:kplasm]
         self.VacuumElems = self.VacuumElems[:kvacuu]
         self.InterElems = self.InterElems[:kint]
         self.BoundaryElems = self.BoundaryElems[:kbound]
+    
         return
     
     
     def ComputeInterfaceApproximation(self):
         """ Compute the coordinates for the points describing the interface linear approximation. """
-            
         for inter, elem in enumerate(self.InterElems):
             self.Elements[elem].InterfaceLinearApproximation()
             self.Elements[elem].interface = inter
+        return
+    
+    def ComputeBoundaryEdges(self):
+        """ Identify the edges lying on the computational domain's boundary, for each element on the boundary. """
+        for elem in self.BoundaryElems:
+            self.Elements[elem].FindBoundaryEdges(self.Tbound)
+        return
+    
+    def ComputeBoundaryNormals(self):
+        for elem in self.BoundaryElems:
+            self.Elements[elem].BoundaryNormal(self.Xmax,self.Xmin,self.Ymax,self.Ymin)
+        self.CheckBoundaryNormalVectors()
+        return
+    
+    def CheckBoundaryNormalVectors(self):
+        for elem in self.BoundaryElems:
+            for edge in range(self.Elements[elem].Nebound):
+                Xebound = self.Elements[elem].Xe[self.Elements[elem].Tebound[edge,:],:]
+                dir = np.array([Xebound[1,0]-Xebound[0,0], Xebound[1,1]-Xebound[0,1]]) 
+                scalarprod = np.dot(dir,self.Elements[elem].NormalVec[edge,:])
+            if scalarprod > 1e-10: 
+                raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
+        return
+    
+    def ComputeInterfaceNormals(self):
+        for elem in self.InterElems:
+            self.Elements[elem].InterfaceNormal()
+        self.CheckInterfaceNormalVectors()
+        return
+    
+    def CheckInterfaceNormalVectors(self):
+        for elem in self.InterElems:
+            dir = np.array([self.Elements[elem].Xeint[1,0]-self.Elements[elem].Xeint[0,0], self.Elements[elem].Xeint[1,1]-self.Elements[elem].Xeint[0,1]]) 
+            scalarprod = np.dot(dir,self.Elements[elem].NormalVec)
+            if scalarprod > 1e-10: 
+                raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
         return
     
     def InitialiseVariables(self):
@@ -490,72 +547,34 @@ class Equili:
         return
     
     def ComputeIntegrationQuadratures(self):
-        # COMPUTE STANDARD QUADRATURE ENTITIES FOR NON-CUT ELEMENTS 
+        # COMPUTE STANDARD 2D QUADRATURE ENTITIES FOR NON-CUT ELEMENTS 
         for elem in np.concatenate((self.PlasmaElems, self.VacuumElems, self.BoundaryElems), axis=0):
-            self.Elements[elem].ComputeStandardQuadrature(self.QuadratureOrder)
+            self.Elements[elem].ComputeStandardQuadrature2D(self.QuadratureOrder)
+        ### FOR BOUNDARY ELEMENTS COMPUTE BOUNDARY QUADRATURE ENTITIES
+        for elem in self.BoundaryElems:
+            self.Elements[elem].ComputeBoundaryQuadrature(self.QuadratureOrder)
             
         # COMPUTE MODIFIED QUADRATURE ENTITIES FOR INTERFACE ELEMENTS
         for elem in self.InterElems:
-            self.Elements[elem].ComputeModifiedQuadrature(self.QuadratureOrder)
+            self.Elements[elem].ComputeModifiedQuadratures(self.QuadratureOrder)
         return
-    
-    def ComputeInterfaceNormals(self):
-        for elem in self.InterElems:
-            self.Elements[elem].InterfaceNormal()
-        self.CheckNormalVectors()
-        return
-    
-    def CheckNormalVectors(self):
-        for elem in self.InterElems:
-            dir = np.array([self.Elements[elem].Xeint[1,0]-self.Elements[elem].Xeint[0,0], self.Elements[elem].Xeint[1,1]-self.Elements[elem].Xeint[0,1]]) 
-            scalarprod = np.dot(dir,self.Elements[elem].NormalVec)
-            if scalarprod > 1e-10: 
-                raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
-        return
-    
     
     def ComputeBoundaryPHI(self):
         
-        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B.
+        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B. 
+        THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
         SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
         FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
-        INTEGRATE THE PLASMA'S GREEN FUNCTION equ_funG.
+        INTEGRATE THE PLASMA'S GREEN FUNCTION.
 
         IN ORDER TO SOLVE A FIXED VALUE PROBLEM INSIDE THE COMPUTATIONAL DOMAIN, THE BOUNDARY VALUES
         PHI_B MUST COMPUTED FROM THE PREVIOUS SOLUTION FOR PHIPOL.  """
         
-        def ellipticK(k):
-            """ COMPLETE ELLIPTIC INTEGRAL OF 1rst KIND """
-            pk=1.0-k*k
-            if k == 1:
-                ellipticK=1.0e+16
-            else:
-                AK = (((0.01451196212*pk+0.03742563713)*pk +0.03590092383)*pk+0.09666344259)*pk+1.38629436112
-                BK = (((0.00441787012*pk+0.03328355346)*pk+0.06880248576)*pk+0.12498593597)*pk+0.5
-                ellipticK = AK-BK*np.log(pk)
-            
-            return ellipticK
-
-        def ellipticE(k):
-            """COMPLETE ELLIPTIC INTEGRAL OF 2nd KIND"""
-            pk = 1 - k*k
-            if k == 1:
-                ellipticE = 1
-            else:
-                AE=(((0.01736506451*pk+0.04757383546)*pk+0.0626060122)*pk+0.44325141463)*pk+1
-                BE=(((0.00526449639*pk+0.04069697526)*pk+0.09200180037)*pk+0.2499836831)*pk
-                ellipticE = AE-BE*np.log(pk)
-            
-            return ellipticE
+        # FUNCTION EXECUTED BEFORE STARTING EACH INTERNAL LOOP ITERATION
         
-        def GreenFunction(Xb,Xp):
-            """ GREEN FUNCTION CORRESPONDING TO THE TOROIDAL ELLIPTIC OPERATOR """
-            kcte= np.sqrt(4*Xb[1]*Xp[1]/((Xb[1]+Xp[1])**2 + (Xp[2]-Xb[2])**2))
-            Greenfun = (1/(2*np.pi))*(np.sqrt(Xp[1]*Xb[1])/kcte)*((2-kcte**2)*ellipticK(kcte)-2*ellipticE(kcte))
-            return Greenfun
-        
-        
-        
+        for elem in self.BoundaryElems:
+            #self.Elements[elem].ComputeElementalPHI_B(self.Elements,self.PlasmaElems,self.InterElems,self.Jphi,self.Ncoils,self.Xcoils,self.Icoils)
+            self.Elements[elem].PHI_Be = np.zeros([self.Elements[elem].Nebound,self.n])
         return
     
     
@@ -584,6 +603,17 @@ class Equili:
                     SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig]) 
             # COMPUTE ELEMENTAL MATRICES
             ELEMENT.IntegrateElementalDomainTerms(SourceTermg,self.LHS,self.RHS)
+            
+        ####### COMPUTE BOUNDARY TERMS 
+        for elem in self.BoundaryElems:
+            # ISOLATE ELEMENT 
+            ELEMENT = self.Elements[elem]
+            # INTERPOLATE BOUNDARY PHI VALUE PHI_B ON BOUNDARY GAUSS INTEGRATION NODES
+            PHI_Bg = np.zeros([ELEMENT.Nebound,ELEMENT.Ng1D])
+            for edge in range(ELEMENT.Nebound):
+                PHI_Bg[edge,:] = ELEMENT.Nbound[edge,:,:] @ ELEMENT.PHI_Be[edge,:]
+            # COMPUTE ELEMENTAL MATRICES
+            ELEMENT.IntegrateElementalBoundaryTerms(PHI_Bg,self.beta,self.LHS,self.RHS)
                 
         print("Done!")
         
@@ -694,10 +724,20 @@ class Equili:
         self.Elements = [Element(e,self.ElType,self.ElOrder,self.X[self.T[e,:],:],self.T[e,:],self.LevelSet[self.T[e,:]],self.PHI_inner0[self.T[e,:]]) for e in range(self.Ne)]
         print('Done!')
         
-        # CLASSIFY ELEMENTS  ->  OBTAIN PLASMAELEMS, VACUUMELEMS, INTERELEMS
+        # CLASSIFY ELEMENTS  ->  OBTAIN PLASMAELEMS, VACUUMELEMS, INTERELEMS, BOUNDARYELEMS
         print("CLASSIFY ELEMENTS...", end="")
         self.ClassifyElements()
         print("Done!")
+        
+        # COMPUTE COMPUTATIONAL DOMAIN'S BOUNDARY EDGES
+        print("FIND BOUNDARY EDGES...", end="")
+        self.ComputeBoundaryEdges()
+        print("Done!")
+        
+        # COMPUTE COMPUTATIONAL DOMAIN'S BOUNDARY NORMALS
+        print('COMPUTE BOUNDARY NORMALS...', end="")
+        self.ComputeBoundaryNormals()
+        print('Done!')
         
         # COMPUTE INTERFACE LINEAR APPROXIMATION
         print("APPROXIMATE INTERFACE...", end="")
@@ -729,6 +769,7 @@ class Equili:
                 self.it_inner += 1
                 self.it += 1
                 print('OUTER ITERATION = '+str(self.it_outer)+' , INNER ITERATION = '+str(self.it_inner))
+                self.ComputeBoundaryPHI()
                 self.AssembleGlobalSystem()
                 #self.ApplyBoundaryConditions()
                 self.SolveSystem()
@@ -800,6 +841,9 @@ class Equili:
             for i in range(self.n):
                 plt.plot([self.X[int(Tmesh[e,i])-1,0], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,0]], 
                         [self.X[int(Tmesh[e,i])-1,1], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,1]], color='orange', linewidth=1)
+        # PLOT BOUNDARY NODES
+        for node in self.BoundaryNodes:
+            plt.scatter(self.X[node,0], self.X[node,1], color='green',marker='o',s=40)
                     
         plt.tricontour(self.X[:,0],self.X[:,1], self.LevelSet, levels=[0], colors='green',linewidths=3)
         
