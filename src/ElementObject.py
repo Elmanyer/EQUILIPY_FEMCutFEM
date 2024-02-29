@@ -346,7 +346,6 @@ class Element:
                 AK = (((0.01451196212*pk+0.03742563713)*pk +0.03590092383)*pk+0.09666344259)*pk+1.38629436112
                 BK = (((0.00441787012*pk+0.03328355346)*pk+0.06880248576)*pk+0.12498593597)*pk+0.5
                 ellipticK = AK-BK*np.log(pk)
-            
             return ellipticK
 
         def ellipticE(k):
@@ -358,16 +357,15 @@ class Element:
                 AE=(((0.01736506451*pk+0.04757383546)*pk+0.0626060122)*pk+0.44325141463)*pk+1
                 BE=(((0.00526449639*pk+0.04069697526)*pk+0.09200180037)*pk+0.2499836831)*pk
                 ellipticE = AE-BE*np.log(pk)
-            
             return ellipticE
         
         def GreenFunction(Xb,Xp):
             """ GREEN FUNCTION CORRESPONDING TO THE TOROIDAL ELLIPTIC OPERATOR """
             kcte= np.sqrt(4*Xb[0]*Xp[0]/((Xb[0]+Xp[0])**2 + (Xp[1]-Xb[1])**2))
-            Greenfun = (1/(2*np.pi))*(np.sqrt(Xp[1]*Xb[1])/kcte)*((2-kcte**2)*ellipticK(kcte)-2*ellipticE(kcte))
+            Greenfun = (1/(2*np.pi))*(np.sqrt(Xp[0]*Xb[0])/kcte)*((2-kcte**2)*ellipticK(kcte)-2*ellipticE(kcte))
             return Greenfun
         
-        self.PHI_Be = np.zeros([self.Nebound,self.nedge])
+        self.PHI_Be = np.zeros([self.Nebound,self.n])
         
         # COMPUTE VALUES OF PHI ON EACH BOUNDARY 
         for i in range(self.Nebound):
@@ -377,7 +375,7 @@ class Element:
                 Xnode = self.Xe[self.Tebound[i,j],:]
                 # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
                 for icoil in range(Ncoils): 
-                    self.PHI_Be[i,j] += Icoils[icoil] * GreenFunction(Xnode,Xcoils[icoil,:]) 
+                    self.PHI_Be[i,self.Tebound[i,j]] += Icoils[icoil] * GreenFunction(Xnode,Xcoils[icoil,:]) 
                     
                 # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
                 #   1. INTEGRATE IN PLASMA ELEMENTS
@@ -389,7 +387,7 @@ class Element:
                     # LOOP OVER GAUSS NODES
                     for ig in range(ELEMENT.Ng2D):
                         for k in range(ELEMENT.n):
-                            self.PHI_Be[i,j] += GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
+                            self.PHI_Be[i,self.Tebound[i,j]] += GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
                                                                     PHIg[ig])*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]*ELEMENT.N[ig,k]
                             
                 #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
@@ -404,7 +402,7 @@ class Element:
                             # LOOP OVER GAUSS NODES
                             for ig in range(SUBELEM.Ng2D):
                                 for k in range(SUBELEM.n):
-                                    self.PHI_Be[i,j] += GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
+                                    self.PHI_Be[i,self.Tebound[i,j]] += GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
                                                                     PHIg[ig])*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*SUBELEM.N[ig,k]
                                     
         return

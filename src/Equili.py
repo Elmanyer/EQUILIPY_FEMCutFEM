@@ -573,8 +573,8 @@ class Equili:
         # FUNCTION EXECUTED BEFORE STARTING EACH INTERNAL LOOP ITERATION
         
         for elem in self.BoundaryElems:
-            #self.Elements[elem].ComputeElementalPHI_B(self.Elements,self.PlasmaElems,self.InterElems,self.Jphi,self.Ncoils,self.Xcoils,self.Icoils)
-            self.Elements[elem].PHI_Be = np.zeros([self.Elements[elem].Nebound,self.n])
+            self.Elements[elem].ComputeElementalPHI_B(self.Elements,self.PlasmaElems,self.InterElems,self.Jphi,self.Ncoils,self.Xcoils,self.Icoils)
+            #self.Elements[elem].PHI_Be = np.zeros([self.Elements[elem].Nebound,self.n])
         return
     
     
