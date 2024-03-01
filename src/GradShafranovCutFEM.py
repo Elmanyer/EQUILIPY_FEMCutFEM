@@ -9,19 +9,22 @@ from src.GaussQuadrature import *
 from src.ShapeFunctions import *
 from src.ElementObject import *
 
-class Equili:
+class GradShafranovCutFEM:
     
     # GENERAL PARAMETERS
     epsilon0 = 8.8542E-12       # F m-1    Magnetic permitivity 
     mu0 = 12.566370E-7           # H m-1    Magnetic permeability
     K = 1.602E-19               # J eV-1   Botlzmann constant
 
-    def __init__(self,folder_loc,ElementType,ElementOrder,CASE,QuadratureOrder):
-        self.directory = folder_loc
-        self.case = folder_loc[folder_loc.rfind("/")+1:]
+    def __init__(self,mesh_folder,EQU_case_file,ElementType,ElementOrder,QuadratureOrder):
+        # INPUT FILES:
+        self.mesh_folder = mesh_folder
+        self.MESH = mesh_folder[mesh_folder.rfind("/")+1:]
+        self.case_file = EQU_case_file
         
         # DECLARE PROBLEM ATTRIBUTES
-        self.CASE = CASE                    # CASE SOLUTION
+        self.PLASMA_BOUNDARY = None
+        self.CASE = None                    # CASE SOLUTION
         self.PlasmaElems = None             # LIST OF ELEMENTS (INDEXES) INSIDE PLASMA REGION
         self.VacuumElems = None             # LIST OF ELEMENTS (INDEXES) OUTSIDE PLASMA REGION (VACUUM REGION)
         self.InterElems = None              # LIST OF CUT ELEMENTS (INDEXES), CONTAINING INTERFACE BETWEEN PLASMA AND VACUUM
@@ -48,10 +51,14 @@ class Equili:
         
         # NUMERICAL TREATMENT PARAMETERS
         self.QuadratureOrder = QuadratureOrder   # NUMERICAL INTEGRATION QUADRATURE ORDER 
-        self.INT_TOL = None                      # INNER LOOP STRUCTURE CONVERGENCE TOLERANCE
-        self.EXT_TOL = None                      # OUTER LOOP STRUCTURE CONVERGENCE TOLERANCE
-        self.INT_ITER = None                     # INNER LOOP STRUCTURE MAXIMUM ITERATIONS NUMBER
-        self.EXT_ITER = None                     # OUTER LOOP STRUCTURE MAXIMUM ITERATIONS NUMBER
+        self.INT_TOL = None                      # INTERNAL LOOP STRUCTURE CONVERGENCE TOLERANCE
+        self.EXT_TOL = None                      # EXTERNAL LOOP STRUCTURE CONVERGENCE TOLERANCE
+        self.INT_ITER = None                     # INTERNAL LOOP STRUCTURE MAXIMUM ITERATIONS NUMBER
+        self.EXT_ITER = None                     # EXTERNAL LOOP STRUCTURE MAXIMUM ITERATIONS NUMBER
+        self.converg_EXT = None                  # EXTERNAL LOOP STRUCTURE CONVERGENCE FLAG
+        self.converg_INT = None                  # INTERNAL LOOP STRUCTURE CONVERGENCE FLAG
+        self.it_EXT = None                       # EXTERNAL LOOP STRUCTURE ITERATIONS NUMBER
+        self_it_INT = None                       # INTERNAL LOOP STRUCTURE ITERATIONS NUMBER
         self.it = 0                              # TOTAL NUMBER OF ITERATIONS COUNTER
         self.alpha = None                        # AIKTEN'S SCHEME RELAXATION CONSTANT
         
@@ -73,14 +80,26 @@ class Equili:
         
         return
     
+    def print_all_attributes(self):
+        """ Function which prints all object EQUILI attributes and their corresponding values. """
+        for attribute, value in vars(self).items():
+            print(f"{attribute}: {value}")
+        return
+    
+    
+    ##################################################################################################
+    ############################### READ INPUT DATA FILES ############################################
+    ##################################################################################################
+    
     def ReadMesh(self):
-        """ Reads from input files the mesh data. """
+        """ Reads input mesh data files. """
         
+        print("     -> READ MESH DATA FILES...",end='')
         # NUMBER OF NODES PER ELEMENT
         self.n, self.nedge = ElementalNumberOfNodes(self.ElType, self.ElOrder)
         
         # READ DOM FILE .dom.dat
-        MeshDataFile = self.directory +'/'+ self.case +'.dom.dat'
+        MeshDataFile = self.mesh_folder +'/'+ self.MESH +'.dom.dat'
         self.Nn = 0   # number of nodes
         self.Ne = 0   # number of elements
         file = open(MeshDataFile, 'r') 
@@ -97,7 +116,7 @@ class Equili:
         file.close()
         
         # READ MESH FILE .geo.dat
-        MeshFile = self.directory +'/'+ self.case +'.geo.dat'
+        MeshFile = self.mesh_folder +'/'+ self.MESH +'.geo.dat'
         self.T = np.zeros([self.Ne,self.n], dtype = int)
         self.X = np.zeros([self.Nn,self.dim], dtype = float)
         self.Tbound = np.zeros([self.Nbound,self.nedge+1], dtype = int)   # LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE 
@@ -170,6 +189,7 @@ class Equili:
         self.Ymax = np.max(self.X[:,1])
         self.Ymin = np.min(self.X[:,1])
         
+        print('Done!')
         return
     
     def ReadEQUILIdata(self):
@@ -181,67 +201,97 @@ class Equili:
                 - PLASMA PROPERTIES
                 - NUMERICAL TREATMENT
                 """
-        
+                
+        print("     -> READ EQUILI DATA FILE...",end='')
         # READ EQU FILE .equ.dat
-        EQUILIDataFile = self.directory +'/'+ self.case +'.equ.dat'
-        self.Ncoils = 0      # number of external coils
-        self.Xcoils = None   # coordinates matrix for external coils 
-        self.Icoils = None   # Current in external coils
+        EQUILIDataFile = self.case_file +'.equ.dat'
         file = open(EQUILIDataFile, 'r') 
         for line in file:
-            l = line.split(':')
-            if l[0] == '   FIXED_BOU':    # READ IF FIXED-BOUNDARY PROBLEM
-                self.FIXED_BOU = int(l[1])
-            elif l[0] == '   FREE_BOU':    # READ IF FREE-BOUNDARY PROBLEM
-                self.FREE_BOU = int(l[1])
-            elif l[0] == '   TOTAL_CURRENT':  # READ TOTAL PLASMA CURRENT
-                self.TOTAL_CURRENT = float(l[1])
-                
-            # READ PLASMA GEOMETRY PARAMETERS
-            elif l[0] == '   X_CENTRE':    # READ PLASMA REGION X_CENTER 
-                self.X_CENTRE = float(l[1])
-            elif l[0] == '   Y_CENTRE':    # READ PLASMA REGION Y_CENTER 
-                self.Y_CENTRE = float(l[1])
-            elif l[0] == '   X_MINOR':    # READ PLASMA REGION X_MINOR 
-                self.X_MINOR = float(l[1])
-            elif l[0] == '   X_MAYOR':    # READ PLASMA REGION X_MAYOR 
-                self.X_MAYOR = float(l[1])
-            elif l[0] == '   YUP_MAYOR':    # READ PLASMA REGION X_CENTER 
-                self.YUP_MAYOR = float(l[1])
-            elif l[0] == '   XYUP_MAYOR':    # READ PLASMA REGION X_CENTER 
-                self.XYUP_MAYOR = float(l[1])
-            elif l[0] == '   YDO_MAYOR':    # READ PLASMA REGION X_CENTER 
-                self.YDO_MAYOR = float(l[1])
-            elif l[0] == '   XYDO_MAYOR':    # READ PLASMA REGION X_CENTER 
-                self.XYDO_MAYOR = float(l[1])
-                
-            # READ COIL PARAMETERS
-            elif l[0] == '   N_COILS':    # READ PLASMA REGION X_CENTER 
-                self.Ncoils = int(l[1])
-                self.Xcoils = np.zeros([self.Ncoils,self.dim])
-                self.Icoils = np.zeros([self.Ncoils])
-                i = 0
-            elif l[0] == '   Xposi':    # READ i-th COIL X POSITION
-                self.Xcoils[i,0] = float(l[1])
-            elif l[0] == '   Yposi':    # READ i-th COIL Y POSITION
-                self.Xcoils[i,1] = float(l[1])
-            elif l[0] == '   Inten':    # READ i-th COIL INTENSITY
-                self.Icoils[i] = float(l[1])
-                i += 1
-                
-            # READ NUMERICAL TREATMENT PARAMETERS
-            elif l[0] == '  EXT_ITER':    # READ MAXIMAL NUMBER OF ITERATION FOR EXTERNAL LOOP
-                self.EXT_ITER = int(l[1])
-            elif l[0] == '  EXT_TOL':    # READ TOLERANCE FOR EXTERNAL LOOP
-                self.EXT_TOL = float(l[1])
-            elif l[0] == '  INT_ITER':    # READ MAXIMAL NUMBER OF ITERATION FOR INTERNAL LOOP
-                self.INT_ITER = int(l[1])
-            elif l[0] == '  INT_TOL':    # READ TOLERANCE FOR INTERNAL LOOP
-                self.INT_TOL = float(l[1])
-            elif l[0] == '  RELAXATION':   # READ AITKEN'S SCHEME RELAXATION CONSTANT
-                self.alpha = float(l[1])
-        
+            l = line.split(' ')
+            l = [m for m in l if m != '']
+            for e, el in enumerate(l):
+                if el == '\n':
+                    l.remove('\n') 
+                elif el[-1:]=='\n':
+                    l[e]=el[:-1]
+                    
+            if l:  # LINE NOT EMPTY
+                if l[0] == 'PLASMA_BOUNDARY:':      # READ IF FIXED/FREE BOUNDARY PROBLEM
+                    self.PLASMA_BOUNDARY = l[1]
+                if l[0] == 'SOL_CASE:':             # READ SOLUTION CASE
+                    self.CASE = l[1]
+                if l[0] == 'TOTAL_CURRENT:':        # READ TOTAL PLASMA CURRENT
+                    self.TOTAL_CURRENT = float(l[1])
+                    
+                ### IF FIXED-BOUNDARY PROBLEM:
+                if self.PLASMA_BOUNDARY == "FIXED":
+                    # READ PLASMA GEOMETRY PARAMETERS
+                    if l[0] == 'R_MAX:':    # READ PLASMA REGION X_CENTER 
+                        self.Rmax = float(l[1])
+                    elif l[0] == 'R_MIN:':    # READ PLASMA REGION Y_CENTER 
+                        self.Rmin = float(l[1])
+                    elif l[0] == 'EPSILON:':    # READ PLASMA REGION X_MINOR 
+                        self.epsilon = float(l[1])
+                    elif l[0] == 'KAPPA:':    # READ PLASMA REGION X_MAYOR 
+                        self.kappa = float(l[1])
+                    elif l[0] == 'DELTA:':    # READ PLASMA REGION X_CENTER 
+                        self.delta = float(l[1])
+                    
+                ### IF FREE-BOUNDARY PROBLEM:
+                elif self.PLASMA_BOUNDARY == 'FREE':
+                    # READ PLASMA GEOMETRY PARAMETERS
+                    if l[0] == 'X_CENTRE:':    # READ PLASMA REGION X_CENTER 
+                        self.X_CENTRE = float(l[1])
+                    elif l[0] == 'Y_CENTRE:':    # READ PLASMA REGION Y_CENTER 
+                        self.Y_CENTRE = float(l[1])
+                    elif l[0] == 'X_MINOR:':    # READ PLASMA REGION X_MINOR 
+                        self.X_MINOR = float(l[1])
+                    elif l[0] == 'X_MAYOR:':    # READ PLASMA REGION X_MAYOR 
+                        self.X_MAYOR = float(l[1])
+                    elif l[0] == 'YUP_MAYOR':    # READ PLASMA REGION X_CENTER 
+                        self.YUP_MAYOR = float(l[1])
+                    elif l[0] == 'XYUP_MAYOR':    # READ PLASMA REGION X_CENTER 
+                        self.XYUP_MAYOR = float(l[1])
+                    elif l[0] == 'YDO_MAYOR':    # READ PLASMA REGION X_CENTER 
+                        self.YDO_MAYOR = float(l[1])
+                    elif l[0] == 'XYDO_MAYOR':    # READ PLASMA REGION X_CENTER 
+                        self.XYDO_MAYOR = float(l[1])
+                    # READ COIL PARAMETERS
+                    elif l[0] == 'N_COILS:':    # READ PLASMA REGION X_CENTER 
+                        self.Ncoils = int(l[1])
+                        self.Xcoils = np.zeros([self.Ncoils,self.dim])
+                        self.Icoils = np.zeros([self.Ncoils])
+                        i = 0
+                    elif l[0] == 'Xposi:':    # READ i-th COIL X POSITION
+                        self.Xcoils[i,0] = float(l[1])
+                    elif l[0] == 'Yposi:':    # READ i-th COIL Y POSITION
+                        self.Xcoils[i,1] = float(l[1])
+                    elif l[0] == 'Inten:':    # READ i-th COIL INTENSITY
+                        self.Icoils[i] = float(l[1])
+                        i += 1
+                    
+                # READ NUMERICAL TREATMENT PARAMETERS
+                if l[0] == 'EXT_ITER:':    # READ MAXIMAL NUMBER OF ITERATION FOR EXTERNAL LOOP
+                    self.EXT_ITER = int(l[1])
+                elif l[0] == 'EXT_TOL:':    # READ TOLERANCE FOR EXTERNAL LOOP
+                    self.EXT_TOL = float(l[1])
+                elif l[0] == 'INT_ITER:':    # READ MAXIMAL NUMBER OF ITERATION FOR INTERNAL LOOP
+                    self.INT_ITER = int(l[1])
+                elif l[0] == 'INT_TOL:':    # READ TOLERANCE FOR INTERNAL LOOP
+                    self.INT_TOL = float(l[1])
+                elif l[0] == 'RELAXATION:':   # READ AITKEN'S SCHEME RELAXATION CONSTANT
+                    self.alpha = float(l[1])
+                    
+        if self.PLASMA_BOUNDARY == "FIXED":
+            self.R0 = (self.Rmax+self.Rmin)/2      
+            
+        print('Done!')  
         return
+    
+    
+    ##################################################################################################
+    ############################# INITIAL GUESS AND SOLUTION CASE ####################################
+    ##################################################################################################
     
     def ComputeLinearSolutionCoefficients(self):
         """ Computes the coeffients for the magnetic flux in the linear source term case, that is for 
@@ -262,40 +312,110 @@ class Equili:
         coeffs = np.linalg.solve(A,b)
         return coeffs.T[0].tolist() 
     
-    def AnalyticalSolution(self,X):
+    def SolutionCASE(self,X):
         """ Function which computes the analytical solution (if it exists) at point with coordinates X. """
-        # DIMENSIONALESS COORDINATES
-        Xstar = X/self.R0
-        #Xstar = X
         
-        if self.CASE == 'LINEAR':
-            if not self.coeffs: 
-                self.coeffs = self.ComputeLinearSolutionCoefficients()  # [D1, D2, D3]
-            PHIexact = (Xstar[0]**4)/8 + self.coeffs[0] + self.coeffs[1]*Xstar[0]**2 + self.coeffs[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2)
+        if self.PLASMA_BOUNDARY == 'FIXED':
+            # DIMENSIONALESS COORDINATES
+            Xstar = X/self.R0
+            if self.CASE == 'LINEAR':
+                if not self.coeffs: 
+                    self.coeffs = self.ComputeLinearSolutionCoefficients()  # [D1, D2, D3]
+                PHIexact = (Xstar[0]**4)/8 + self.coeffs[0] + self.coeffs[1]*Xstar[0]**2 + self.coeffs[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2)
+                
+            elif self.CASE == 'NONLINEAR':
+                if not self.coeffs:
+                    self.coeffs = [1.15*np.pi, 1.15, -0.5]  # [Kr, Kz, R0]
+                PHIexact = np.sin(self.coeffs[0]*(Xstar[0]+self.coeffs[2]))*np.cos(self.coeffs[1]*Xstar[1])
             
-        elif self.CASE == 'NONLINEAR':
-            if not self.coeffs:
-                self.coeffs = [1.15*np.pi, 1.15, -0.5]  # [Kr, Kz, R0]
-            PHIexact = np.sin(self.coeffs[0]*(Xstar[0]+self.coeffs[2]))*np.cos(self.coeffs[1]*Xstar[1])
+        elif self.PLASMA_BOUNDARY == 'FREE': 
+            if self.CASE == 'CASE0':
+                PHIexact = 0 
             
         return PHIexact
     
+    
+    ##################################################################################################
+    ###################################### PLASMA CURRENT ############################################
+    ##################################################################################################
+    
     def Jphi(self,R,Z,phi):
         """ Function which computes the plasma current source term on the right hand side of the Grad-Shafranov equation. """
-        R = R/self.R0
-        Z = Z/self.R0
         
-        if self.CASE == 'LINEAR':
-            # self.coeffs = [D1 D2 D3]  for linear solution
-            jphi = R/self.mu0
-            
-        if self.CASE == 'NONLINEAR': 
-            # self.coeffs = [Kr Kz R0]  for nonlinear solution
-            jphi = -((self.coeffs[0]**2+self.coeffs[1]**2)*phi+(self.coeffs[0]/R)*np.cos(self.coeffs[0]*(R+self.coeffs[2]))*np.cos(self.coeffs[1]*Z)
-            +R*((np.sin(self.coeffs[0]*(R+self.coeffs[2]))*np.cos(self.coeffs[1]*Z))**2-phi**2+np.exp(-np.sin(self.coeffs[0]*(R+self.coeffs[2]))*
+        if self.PLASMA_BOUNDARY == 'FIXED':
+            # NORMALIE COORDINATES
+            R = R/self.R0
+            Z = Z/self.R0
+            # COMPUTE  PLASMA CURRENT
+            if self.CASE == 'LINEAR':
+                # self.coeffs = [D1 D2 D3]  for linear solution
+                jphi = R/self.mu0
+                
+            if self.CASE == 'NONLINEAR': 
+                # self.coeffs = [Kr Kz R0]  for nonlinear solution
+                jphi = -((self.coeffs[0]**2+self.coeffs[1]**2)*phi+(self.coeffs[0]/R)*np.cos(self.coeffs[0]*(R+self.coeffs[2]))*np.cos(self.coeffs[1]*Z)
+                +R*((np.sin(self.coeffs[0]*(R+self.coeffs[2]))*np.cos(self.coeffs[1]*Z))**2-phi**2+np.exp(-np.sin(self.coeffs[0]*(R+self.coeffs[2]))*
                                                                                             np.cos(self.coeffs[1]*Z))-np.exp(-phi)))/(self.mu0*R)
         return jphi
     
+    
+    ##################################################################################################
+    ###################################### ELEMENTS DEFINITION #######################################
+    ##################################################################################################
+    
+    def ClassifyElements(self):
+        """ Function that sperates the elements into 4 groups: 
+                - PlasmaElems: elements inside the plasma region P(phi) where the plasma current is different from 0
+                - VacuumElems: elements outside the plasma region P(phi) where the plasma current is 0
+                - InterElems: elements containing the plasma region's interface 
+                - BoundaryElems: elements located at the computational domain's boundary, outside the plasma region P(phi) where the plasma current is 0. """
+        
+        self.PlasmaElems = np.zeros([self.Ne], dtype=int)    # GLOBAL INDEXES OF ELEMENTS INSIDE PLASMA REGION
+        self.VacuumElems = np.zeros([self.Ne], dtype=int)    # GLOBAL INDEXES OF ELEMENTS OUTSIDE PLASMA REGION (VACUUM REGION)
+        self.InterElems = np.zeros([self.Ne], dtype=int)     # GLOBAL INDEXES OF CUT ELEMENTS, CONTAINING INTERFACE BETWEEN PLASMA AND VACUUM 
+        self.BoundaryElems = np.zeros([self.Ne], dtype=int)  # GLOBAL INDEXES OF ELEMENTS ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
+        kplasm = 0
+        kvacuu = 0
+        kint = 0
+        kbound = 0
+        
+        for e in range(self.Ne):
+            # WE FIRST EXTRACT THE LIST OF BOUNDARY ELEMENTS THANKS TO THE CONNECTIVITY MATRIX Tbound OBTAINED FROM THE MESH INPUT FILE DATA
+            if e in self.Tbound[:,-1]:
+                self.BoundaryElems[kbound] = e
+                self.Elements[e].Dom = +1
+                kbound += 1
+            else:
+                LSe = self.Elements[e].LSe  # elemental nodal level-set values
+                for i in range(self.n-1):
+                    if np.sign(LSe[i]) !=  np.sign(LSe[i+1]):  # if the sign between nodal values change -> interface element
+                        self.InterElems[kint] = e
+                        self.Elements[e].Dom = 0
+                        kint += 1
+                        break
+                    else:
+                        if i+2 == self.n:   # if all nodal values have the same sign
+                            if np.sign(LSe[i+1]) > 0:   # all nodal values with positive sign -> vacuum vessel element
+                                self.Elements[e].Dom = +1
+                                self.VacuumElems[kvacuu] = e
+                                kvacuu += 1
+                            else:   # all nodal values with negative sign -> plasma region element 
+                                self.PlasmaElems[kplasm] = e
+                                self.Elements[e].Dom = -1
+                                kplasm += 1
+                            
+        # DELETE REST OF UNUSED MEMORY
+        self.PlasmaElems = self.PlasmaElems[:kplasm]
+        self.VacuumElems = self.VacuumElems[:kvacuu]
+        self.InterElems = self.InterElems[:kint]
+        self.BoundaryElems = self.BoundaryElems[:kbound]
+    
+        return
+    
+    
+    ##################################################################################################
+    ############################### SOLUTION NORMALISATION ###########################################
+    ##################################################################################################
     
     def ComputeCriticalPHI(self,PHI):
         """ Function which computes the values of PHI at the:
@@ -421,162 +541,9 @@ class Equili:
         return PHIbar
     
     
-    def InitialGuess(self):
-        """ This function computes the problem's initial guess. 
-                - PHI0: initial guess values  
-                """
-        PHI0 = np.zeros([self.Nn])
-        for i in range(self.Nn):
-            PHIexact = self.AnalyticalSolution(self.X[i,:])
-            PHI0[i] = PHIexact*2*random()
-            
-        return PHI0
-    
-    
-    def InitialLevelSet(self):
-        """ Use the analytical solution for the LINEAR case as initial Level-Set function. The plasma region is characterised by a negative value of Level-Set. """
-        # ADIMENSIONALISE MESH
-        Xstar = self.X/self.R0
-        LS0 = np.zeros([self.Nn])
-        coeffs = self.ComputeLinearSolutionCoefficients()
-        for i in range(self.Nn):
-            LS0[i] = Xstar[i,0]**4/8 + coeffs[0] + coeffs[1]*Xstar[i,0]**2 + coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
-        return LS0
-    
-    
-    def ClassifyElements(self):
-        """ Function that sperates the elements into 4 groups: 
-                - PlasmaElems: elements inside the plasma region P(phi) where the plasma current is different from 0
-                - VacuumElems: elements outside the plasma region P(phi) where the plasma current is 0
-                - InterElems: elements containing the plasma region's interface 
-                - BoundaryElems: elements located at the computational domain's boundary, outside the plasma region P(phi) where the plasma current is 0. """
-        
-        self.PlasmaElems = np.zeros([self.Ne], dtype=int)    # GLOBAL INDEXES OF ELEMENTS INSIDE PLASMA REGION
-        self.VacuumElems = np.zeros([self.Ne], dtype=int)    # GLOBAL INDEXES OF ELEMENTS OUTSIDE PLASMA REGION (VACUUM REGION)
-        self.InterElems = np.zeros([self.Ne], dtype=int)     # GLOBAL INDEXES OF CUT ELEMENTS, CONTAINING INTERFACE BETWEEN PLASMA AND VACUUM 
-        self.BoundaryElems = np.zeros([self.Ne], dtype=int)  # GLOBAL INDEXES OF ELEMENTS ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
-        kplasm = 0
-        kvacuu = 0
-        kint = 0
-        kbound = 0
-        
-        for e in range(self.Ne):
-            # WE FIRST EXTRACT THE LIST OF BOUNDARY ELEMENTS THANKS TO THE CONNECTIVITY MATRIX Tbound OBTAINED FROM THE MESH INPUT FILE DATA
-            if e in self.Tbound[:,-1]:
-                self.BoundaryElems[kbound] = e
-                self.Elements[e].Dom = +1
-                kbound += 1
-            else:
-                LSe = self.Elements[e].LSe  # elemental nodal level-set values
-                for i in range(self.n-1):
-                    if np.sign(LSe[i]) !=  np.sign(LSe[i+1]):  # if the sign between nodal values change -> interface element
-                        self.InterElems[kint] = e
-                        self.Elements[e].Dom = 0
-                        kint += 1
-                        break
-                    else:
-                        if i+2 == self.n:   # if all nodal values have the same sign
-                            if np.sign(LSe[i+1]) > 0:   # all nodal values with positive sign -> vacuum vessel element
-                                self.Elements[e].Dom = +1
-                                self.VacuumElems[kvacuu] = e
-                                kvacuu += 1
-                            else:   # all nodal values with negative sign -> plasma region element 
-                                self.PlasmaElems[kplasm] = e
-                                self.Elements[e].Dom = -1
-                                kplasm += 1
-                            
-        # DELETE REST OF UNUSED MEMORY
-        self.PlasmaElems = self.PlasmaElems[:kplasm]
-        self.VacuumElems = self.VacuumElems[:kvacuu]
-        self.InterElems = self.InterElems[:kint]
-        self.BoundaryElems = self.BoundaryElems[:kbound]
-    
-        return
-    
-    
-    def ComputeInterfaceApproximation(self):
-        """ Compute the coordinates for the points describing the interface linear approximation. """
-        for inter, elem in enumerate(self.InterElems):
-            self.Elements[elem].InterfaceLinearApproximation()
-            self.Elements[elem].interface = inter
-        return
-    
-    def ComputeBoundaryEdges(self):
-        """ Identify the edges lying on the computational domain's boundary, for each element on the boundary. """
-        for elem in self.BoundaryElems:
-            self.Elements[elem].FindBoundaryEdges(self.Tbound)
-        return
-    
-    def ComputeBoundaryNormals(self):
-        for elem in self.BoundaryElems:
-            self.Elements[elem].BoundaryNormal(self.Xmax,self.Xmin,self.Ymax,self.Ymin)
-        self.CheckBoundaryNormalVectors()
-        return
-    
-    def CheckBoundaryNormalVectors(self):
-        for elem in self.BoundaryElems:
-            for edge in range(self.Elements[elem].Nebound):
-                Xebound = self.Elements[elem].Xe[self.Elements[elem].Tebound[edge,:],:]
-                dir = np.array([Xebound[1,0]-Xebound[0,0], Xebound[1,1]-Xebound[0,1]]) 
-                scalarprod = np.dot(dir,self.Elements[elem].NormalVec[edge,:])
-            if scalarprod > 1e-10: 
-                raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
-        return
-    
-    def ComputeInterfaceNormals(self):
-        for elem in self.InterElems:
-            self.Elements[elem].InterfaceNormal()
-        self.CheckInterfaceNormalVectors()
-        return
-    
-    def CheckInterfaceNormalVectors(self):
-        for elem in self.InterElems:
-            dir = np.array([self.Elements[elem].Xeint[1,0]-self.Elements[elem].Xeint[0,0], self.Elements[elem].Xeint[1,1]-self.Elements[elem].Xeint[0,1]]) 
-            scalarprod = np.dot(dir,self.Elements[elem].NormalVec)
-            if scalarprod > 1e-10: 
-                raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
-        return
-    
-    def InitialiseVariables(self):
-        self.PHI = np.zeros([self.Nn,self.EXT_ITER*self.INT_ITER])  # All computed solutions matrix  
-        self.PHI_inner0 = np.zeros([self.Nn])      # solution at inner iteration n
-        self.PHI_inner1 = np.zeros([self.Nn])      # solution at inner iteration n+1
-        self.PHI_outer0 = np.zeros([self.Nn])      # solution at outer iteration n
-        self.PHI_outer1 = np.zeros([self.Nn])      # solution at outer iteration n+1
-        self.PHI_converged = np.zeros([self.Nn])   # converged solution 
-        return
-    
-    def ComputeIntegrationQuadratures(self):
-        # COMPUTE STANDARD 2D QUADRATURE ENTITIES FOR NON-CUT ELEMENTS 
-        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems, self.BoundaryElems), axis=0):
-            self.Elements[elem].ComputeStandardQuadrature2D(self.QuadratureOrder)
-        ### FOR BOUNDARY ELEMENTS COMPUTE BOUNDARY QUADRATURE ENTITIES
-        for elem in self.BoundaryElems:
-            self.Elements[elem].ComputeBoundaryQuadrature(self.QuadratureOrder)
-            
-        # COMPUTE MODIFIED QUADRATURE ENTITIES FOR INTERFACE ELEMENTS
-        for elem in self.InterElems:
-            self.Elements[elem].ComputeModifiedQuadratures(self.QuadratureOrder)
-        return
-    
-    def ComputeBoundaryPHI(self):
-        
-        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B. 
-        THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
-        SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
-        FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
-        INTEGRATE THE PLASMA'S GREEN FUNCTION.
-
-        IN ORDER TO SOLVE A FIXED VALUE PROBLEM INSIDE THE COMPUTATIONAL DOMAIN, THE BOUNDARY VALUES
-        PHI_B MUST COMPUTED FROM THE PREVIOUS SOLUTION FOR PHIPOL.  """
-        
-        # FUNCTION EXECUTED BEFORE STARTING EACH INTERNAL LOOP ITERATION
-        
-        for elem in self.BoundaryElems:
-            self.Elements[elem].ComputeElementalPHI_B(self.Elements,self.PlasmaElems,self.InterElems,self.Jphi,self.Ncoils,self.Xcoils,self.Icoils)
-            #self.Elements[elem].PHI_Be = np.zeros([self.Elements[elem].Nebound,self.n])
-        return
-    
+    ##################################################################################################
+    ################################ GLOBAL SYSTEM SOLVER ############################################
+    ##################################################################################################
     
     def AssembleGlobalSystem(self):
         """ This routine assembles the global matrices derived from the discretised linear system of equations used the common Galerkin approximation. 
@@ -643,7 +610,7 @@ class Equili:
             # COMPUTE INTERFACE CONDITIONS PHI_D
             ELEMENT.PHI_Dg = np.zeros([ELEMENT.Ng1D])
             for ig in range(ELEMENT.Ng1D):
-                ELEMENT.PHI_Dg[ig] = self.AnalyticalSolution(ELEMENT.Xgint[ig,:])
+                ELEMENT.PHI_Dg[ig] = self.SolutionCASE(ELEMENT.Xgint[ig,:])
                 
             # COMPUTE ELEMENTAL MATRICES
             ELEMENT.IntegrateElementalInterfaceTerms(ELEMENT.PHI_Dg,self.beta,self.LHS,self.RHS)
@@ -666,33 +633,38 @@ class Equili:
         
         return
     
+    
+    ##################################################################################################
+    ############################### CONVERGENCE VALIDATION ###########################################
+    ##################################################################################################
+    
     def CheckConvergence(self,loop):
         
-        if loop == "INNER":
+        if loop == "INTERNAL":
             # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
             if np.linalg.norm(self.PHI_inner1) > 0:
                 L2residu = np.linalg.norm(self.PHI_inner1 - self.PHI_inner0)/np.linalg.norm(self.PHI_inner1)
             else: 
                 L2residu = np.linalg.norm(self.PHI_inner1 - self.PHI_inner0)
             if L2residu < self.INT_TOL:
-                self.marker_inner = False   # STOP WHILE LOOP 
+                self.converg_INT = False   # STOP WHILE LOOP 
                 self.PHI_outer1 = self.PHI_inner1
             else:
-                self.marker_inner = True
+                self.converg_INT = True
                 self.PHI_inner0 = self.PHI_inner1
             
-        elif loop == "OUTER":
+        elif loop == "EXTERNAL":
             # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
             if np.linalg.norm(self.PHI_outer1) > 0:
                 L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)/np.linalg.norm(self.PHI_outer1)
             else: 
                 L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)
             if L2residu < self.EXT_TOL:
-                self.marker_outer = False   # STOP WHILE LOOP 
+                self.converg_EXT = False   # STOP WHILE LOOP 
                 self.PHI = self.PHI[:,:self.it+1]
                 self.PHI_converged = self.PHI_outer1
             else:
-                self.marker_outer = True
+                self.converg_EXT = True
                 self.PHI_outer0 = self.PHI_outer1
         return 
     
@@ -700,88 +672,242 @@ class Equili:
         for element in self.Elements:
             element.PHIe = self.PHI_inner1[element.Te]
         return
-
     
-    def PlasmaEquilibrium(self):
-        
+    
+    ##################################################################################################
+    ############################### OPERATIONS OVER GROUPS ###########################################
+    ##################################################################################################
+    
+    ##################### INITIALISATION 
+    
+    def InitialGuess(self):
+        """ This function computes the problem's initial guess. """
+        PHI0 = np.zeros([self.Nn])
+        for i in range(self.Nn):
+            PHIexact = self.SolutionCASE(self.X[i,:])
+            PHI0[i] = PHIexact*2*random()
+        return PHI0
+    
+    def InitialLevelSet(self):
+        """ COMPUTE THE INITIAL LEVEL-SET FUNCTION VALUES DESCRIBING THE INITIAL PLASMA REGION GEOMETRY. 
+            -> FIXED-BOUNDARY PROBLEM: Use the analytical solution for the LINEAR case as initial Level-Set function. The plasma region is characterised by a negative value of Level-Set.
+            -> FREE-BOUNDARY PROBLEM: """
+            
+        if self.PLASMA_BOUNDARY == 'FIXED':
+            # ADIMENSIONALISE MESH
+            Xstar = self.X/self.R0
+            LS0 = np.zeros([self.Nn])
+            coeffs = self.ComputeLinearSolutionCoefficients()
+            for i in range(self.Nn):
+                LS0[i] = Xstar[i,0]**4/8 + coeffs[0] + coeffs[1]*Xstar[i,0]**2 + coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
+                
+        elif self.PLASMA_BOUNDARY == 'FREE':
+            LS0 = np.zeros([self.Nn])
+            
+        return LS0
+    
+    def InitialiseElements(self):
+        """ Function initialising attribute ELEMENTS which is a list of all elements in the mesh. """
+        self.Elements = [Element(e,self.ElType,self.ElOrder,self.X[self.T[e,:],:],self.T[e,:],self.LevelSet[self.T[e,:]],self.PHI_inner0[self.T[e,:]]) for e in range(self.Ne)]
+        return
+    
+    def InitialisePHI(self):  
+        """ INITIALISE PHI VECTORS WHERE THE DIFFERENT SOLUTIONS WILL BE STORED ITERATIVELY DURING THE SIMULATION AND COMPUTE INITIAL GUESS."""
+        # INITIALISE PHI VECTORS
+        self.PHI_INT = np.zeros([self.Nn,2])      # INTERNAL LOOP SOLUTION AT INTARTIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
+        self.PHI_EXT = np.zeros([self.Nn,2])      # EXTERNAL LOOP SOLUTION AT INTARTIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
+        self.PHI_CONV = np.zeros([self.Nn])       # CONVERGED SOLUTION 
+        # COMPUTE INITIAL GUESS AND STORE IT FOR BOTH INTERNAL AND EXTERNAL SOLUTIONS FOR N=0
+        PHI0 = self.InitialGuess()
+        self.PHI_INT[:,0] = PHI0     
+        self.PHI_EXT[:,0] = PHI0
+        return
+    
+    
+    def Initialization(self):
+        """ Routine which initialises all the necessary elements in the problem """
         # INITIALISE VARIABLES
-        self.InitialiseVariables()
-        
-        # INITIAL GUESS FOR MAGNETIC FLUX
-        print("COMPUTE INITIAL GUESS...", end="")
-        self.PHI_inner0 = self.InitialGuess()
-        self.PHI_outer0 = self.PHI_inner0
-        self.PHI[:,0] = self.PHI_inner0
+        print("     -> COMPUTE INITIAL GUESS...", end="")
+        self.InitialisePHI()
         print('Done!')
-        
+
         # INITIALISE LEVEL-SET FUNCTION
-        print("INITIALISE LEVEL-SET...", end="")
+        print("     -> INITIALISE LEVEL-SET...", end="")
         self.LevelSet = self.InitialLevelSet()
         print('Done!')
-        
+
         # INITIALISE ELEMENTS 
-        print("INITIALISE ELEMENTS...", end="")
-        self.Elements = [Element(e,self.ElType,self.ElOrder,self.X[self.T[e,:],:],self.T[e,:],self.LevelSet[self.T[e,:]],self.PHI_inner0[self.T[e,:]]) for e in range(self.Ne)]
+        print("     -> INITIALISE ELEMENTS...", end="")
+        self.InitialiseElements()
         print('Done!')
-        
+
         # CLASSIFY ELEMENTS  ->  OBTAIN PLASMAELEMS, VACUUMELEMS, INTERELEMS, BOUNDARYELEMS
-        print("CLASSIFY ELEMENTS...", end="")
+        print("     -> CLASSIFY ELEMENTS...", end="")
         self.ClassifyElements()
         print("Done!")
-        
+
         # COMPUTE COMPUTATIONAL DOMAIN'S BOUNDARY EDGES
-        print("FIND BOUNDARY EDGES...", end="")
+        print("     -> FIND BOUNDARY EDGES...", end="")
         self.ComputeBoundaryEdges()
         print("Done!")
-        
+
         # COMPUTE COMPUTATIONAL DOMAIN'S BOUNDARY NORMALS
-        print('COMPUTE BOUNDARY NORMALS...', end="")
+        print('     -> COMPUTE BOUNDARY NORMALS...', end="")
         self.ComputeBoundaryNormals()
         print('Done!')
-        
+
         # COMPUTE INTERFACE LINEAR APPROXIMATION
-        print("APPROXIMATE INTERFACE...", end="")
+        print("     -> APPROXIMATE INTERFACE...", end="")
         self.ComputeInterfaceApproximation()
         print("Done!")
-        
+
         # COMPUTE INTERFACE APPROXIMATION NORMALS
-        print('COMPUTE INTERFACE NORMALS...', end="")
+        print('     -> COMPUTE INTERFACE NORMALS...', end="")
         self.ComputeInterfaceNormals()
         print('Done!')
-        
+
         # COMPUTE NUMERICAL INTEGRATION QUADRATURES
-        print('COMPUTE NUMERICAL INTEGRATION QUADRATURES...', end="")
+        print('     -> COMPUTE NUMERICAL INTEGRATION QUADRATURES...', end="")
         self.ComputeIntegrationQuadratures()
         print('Done!')
         
-        self.PlotSolution(self.PHI_inner0)
+        return
+
+    
+    ##################### OPERATIONS ON COMPUTATIONAL DOMAIN'S BOUNDARY EDGES #########################
+    
+    def ComputeBoundaryEdges(self):
+        """ Identify the edges lying on the computational domain's boundary, for each element on the boundary. """
+        for elem in self.BoundaryElems:
+            self.Elements[elem].FindBoundaryEdges(self.Tbound)
+        return
+    
+    def ComputeBoundaryNormals(self):
+        for elem in self.BoundaryElems:
+            self.Elements[elem].BoundaryNormal(self.Xmax,self.Xmin,self.Ymax,self.Ymin)
+        self.CheckBoundaryNormalVectors()
+        return
+    
+    def CheckBoundaryNormalVectors(self):
+        for elem in self.BoundaryElems:
+            for edge in range(self.Elements[elem].Nebound):
+                Xebound = self.Elements[elem].Xe[self.Elements[elem].Tebound[edge,:],:]
+                dir = np.array([Xebound[1,0]-Xebound[0,0], Xebound[1,1]-Xebound[0,1]]) 
+                scalarprod = np.dot(dir,self.Elements[elem].NormalVec[edge,:])
+            if scalarprod > 1e-10: 
+                raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
+        return
+    
+    def ComputeBoundaryPHI(self):
         
-        # START DOBLE LOOP STRUCTURE
-        print('START ITERATION...')
-        self.marker_outer = True
-        self.it_outer = 0
-        self.it = 0
-        while (self.marker_outer == True and self.it_outer < self.EXT_ITER):
-            self.it_outer += 1
-            self.marker_inner = True
-            self.it_inner = 0
-            while (self.marker_inner == True and self.it_inner < self.INT_ITER):
-                self.it_inner += 1
-                self.it += 1
-                print('OUTER ITERATION = '+str(self.it_outer)+' , INNER ITERATION = '+str(self.it_inner))
-                self.ComputeBoundaryPHI()
-                self.AssembleGlobalSystem()
-                #self.ApplyBoundaryConditions()
-                self.SolveSystem()
-                self.UpdateElementalPHI()
-                self.PlotSolution(self.PHI_inner1)
-                self.CheckConvergence("INNER")
-                
-            self.CheckConvergence("OUTER")
+        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B. 
+        THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
+        SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
+        FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
+        INTEGRATE THE PLASMA'S GREEN FUNCTION.
+
+        IN ORDER TO SOLVE A FIXED VALUE PROBLEM INSIDE THE COMPUTATIONAL DOMAIN, THE BOUNDARY VALUES
+        PHI_B MUST COMPUTED FROM THE PREVIOUS SOLUTION FOR PHIPOL.  """
         
-        self.PlotSolution(self.PHI_converged,colorbar=True)
+        # FOR FIXED PLASMA BOUNDARY, THE COMPUTATIONAL DOMAIN BOUNDARY PHI VALUES ARE IRRELEVANT, AS THE PLASMA REGION SHAPE IS ALREADY DEFINED
+        if self.PLASMA_BOUNDARY == 'FIXED':  
+            for elem in self.BoundaryElems:
+                self.Elements[elem].PHI_Be = np.zeros([self.Elements[elem].Nebound,self.n])
+        
+        # FOR FREE PLASMA BOUNDARY, THE COMPUTATIONAL DOMAIN BOUNDARY PHI VALUES ARE COMPUTED FROM THE GRAD-SHAFRANOV OPERATOR'S GREEN FUNCTION
+        elif self.PLASMA_BOUNDARY == 'FREE':  
+            for elem in self.BoundaryElems:
+                self.Elements[elem].ComputeElementalPHI_B(self.Elements,self.PlasmaElems,self.InterElems,self.Jphi,self.Ncoils,self.Xcoils,self.Icoils)
             
         return
+    
+    ##################### OPERATIONS ON INTERFACE ON CUT ELEMENTS ################################
+    
+    def ComputeInterfaceApproximation(self):
+        """ Compute the coordinates for the points describing the interface linear approximation. """
+        for inter, elem in enumerate(self.InterElems):
+            self.Elements[elem].InterfaceLinearApproximation()
+            self.Elements[elem].interface = inter
+        return
+    
+    def ComputeInterfaceNormals(self):
+        for elem in self.InterElems:
+            self.Elements[elem].InterfaceNormal()
+        self.CheckInterfaceNormalVectors()
+        return
+    
+    def CheckInterfaceNormalVectors(self):
+        for elem in self.InterElems:
+            dir = np.array([self.Elements[elem].Xeint[1,0]-self.Elements[elem].Xeint[0,0], self.Elements[elem].Xeint[1,1]-self.Elements[elem].Xeint[0,1]]) 
+            scalarprod = np.dot(dir,self.Elements[elem].NormalVec)
+            if scalarprod > 1e-10: 
+                raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
+        return
+    
+    ##################### COMPUTE NUMERICAL INTEGRATION QUADRATURES FOR EACH ELEMENT GROUP 
+    
+    def ComputeIntegrationQuadratures(self):
+        """ ROUTINE WHERE THE NUMERICAL INTEGRATION QUADRATURES FOR ALL ELEMENTS IN THE MESH ARE PREPARED. """
+        
+        # COMPUTE STANDARD 2D QUADRATURE ENTITIES FOR NON-CUT ELEMENTS 
+        for elem in np.concatenate((self.PlasmaElems, self.VacuumElems, self.BoundaryElems), axis=0):
+            self.Elements[elem].ComputeStandardQuadrature2D(self.QuadratureOrder)
+            
+        # FOR BOUNDARY ELEMENTS COMPUTE BOUNDARY QUADRATURE ENTITIES TO INTEGRATE OVER BOUNDARY EDGES
+        for elem in self.BoundaryElems:
+            self.Elements[elem].ComputeBoundaryQuadrature(self.QuadratureOrder)
+            
+        # COMPUTE MODIFIED QUADRATURE ENTITIES FOR INTERFACE ELEMENTS
+        for elem in self.InterElems:
+            self.Elements[elem].ComputeModifiedQuadratures(self.QuadratureOrder)
+        return
+    
+    
+    ##################################################################################################
+    ######################################## MAIN ALGORITHM ##########################################
+    ##################################################################################################
+    
+    def EQUILI(self):
+        # READ INPUT FILES
+        print("READ INPUT FILES...")
+        self.ReadMesh()
+        self.ReadEQUILIdata()
+        print('Done!')
+        
+        # INITIALIZATION
+        print("INITIALIZATION...")
+        self.Initialization()
+        print('Done!')
+
+        # START DOBLE LOOP STRUCTURE
+        print('START ITERATION...')
+        self.converg_EXT = True
+        self.it_EXT = 0
+        self.it = 0
+        while (self.converg_EXT == True and self.it_EXT < self.EXT_ITER):
+            self.it_EXT += 1
+            self.converg_INT = True
+            self.it_INT = 0
+            while (self.converg_INT == True and self.it_INT < self.INT_ITER):
+                self.it_INT += 1
+                self.it += 1
+                print('OUTER ITERATION = '+str(self.it_EXT)+' , INNER ITERATION = '+str(self.it_INT))
+                self.ComputeBoundaryPHI()
+                self.AssembleGlobalSystem()
+                self.SolveSystem()
+                self.UpdateElementalPHI()
+                self.CheckConvergence("INTERNAL")
+                
+            self.CheckConvergence("EXTERNAL")
+
+        self.PlotSolution(self.PHI_converged,colorbar=True)
+        
+        return
+    
+    
+    ##################################################################################################
+    ############################### RENDERING AND REPRESENTATION #####################################
+    ##################################################################################################
     
     def PlotSolution(self,phi,colorbar=False):
         if len(np.shape(phi)) == 2:
@@ -906,7 +1032,7 @@ class Equili:
             
         error = np.zeros([self.Nn])
         for i in range(self.Nn):
-            PHIexact = self.AnalyticalSolution(self.X[i,:])
+            PHIexact = self.SolutionCASE(self.X[i,:])
             error[i] = np.abs(PHIexact-phi[i])
             
         plt.figure(figsize=(7,10))

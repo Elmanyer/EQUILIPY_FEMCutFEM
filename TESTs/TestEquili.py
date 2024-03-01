@@ -1,5 +1,5 @@
 
-from Equili import *
+from GradShafranovCutFEM import *
 
 # LOCATION OF PROBLEM FOLDER
 folder_loc = '/home/elmanyer/Documents/BSC/MasterThesis/Code/execution/TS-'
@@ -24,7 +24,7 @@ Rmin = 4                  # plasma minor radius
 
 # DECLARE OBJECT PROBLEM (folder with ALYA files)
 directory = folder_loc + case
-Problem = Equili(directory,ElementType,ElementOrder,Rmax,Rmin,epsilon,kappa,delta)
+Problem = GradShafranovCutFEM(directory,ElementType,ElementOrder,Rmax,Rmin,epsilon,kappa,delta)
 
 Problem.ReadMesh()
 Problem.PlasmaEquilibrium() 
