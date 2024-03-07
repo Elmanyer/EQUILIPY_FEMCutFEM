@@ -37,6 +37,15 @@ class GradShafranovCutFEM:
         self.PHI_B = None                   # VACUUM VESSEL BOUNDARY PHI VALUES (EXTERNAL LOOP) AT ITERATION N (COLUMN 0) AND N+1 (COLUMN 1) 
         self.PHI_CONV = None                # CONVERGED NORMALISED PHI SOLUTION FIELD  
         
+        # VACCUM VESSEL GEOMETRY
+        self.epsilon = None                 # PLASMA REGION ASPECT RATIO
+        self.kappa = None                   # PLASMA REGION ELONGATION
+        self.delta = None                   # PLASMA REGION TRIANGULARITY
+        self.Rmax = None                    # PLASMA REGION MAJOR RADIUS
+        self.Rmin = None                    # PLASMA REGION MINOR RADIUS
+        self.R0 = None                      # PLASMA REGION MEAN RADIUS
+        
+        ###### FOR FREE-BOUNDARY PROBLEM
         # PARAMETERS FOR COILS
         self.Ncoils = None                  # TOTAL NUMBER OF COILS
         self.Xcoils = None                  # COILS' COORDINATE MATRIX 
@@ -46,14 +55,15 @@ class GradShafranovCutFEM:
         self.Xsolenoids = None              # SOLENOIDS' COORDINATE MATRIX
         self.Nturnssole = None              # SOLENOIDS' NUMBER OF TURNS
         self.Isolenoids = None              # SOLENOIDS' CURRENT
-        # PLASMA REGION GEOMETRY
-        self.epsilon = None                 # PLASMA REGION ASPECT RATIO
-        self.kappa = None                   # PLASMA REGION ELONGATION
-        self.delta = None                   # PLASMA REGION TRIANGULARITY
-        self.Rmax = None                    # PLASMA REGION MAJOR RADIUS
-        self.Rmin = None                    # PLASMA REGION MINOR RADIUS
-        self.R0 = None                      # PLASMA REGION MEAN RADIUS
+        # PRESSURE AND TOROIDAL FIELD PROFILES
+        self.B0 = None                      # TOROIDAL FIELD MAGNITUDE ON MAGNETIC AXIS
+        self.q0 = None                      # TOKAMAK SAFETY FACTOR
+        self.p0 = None                      # PRESSURE PROFILE FACTOR
+        self.n_p = None                     # EXPONENT FOR PRESSURE PROFILE p_hat FUNCTION
+        self.g0 = None                      # TOROIDAL FIELD FACTOR
+        self.n_g = None                     # EXPONENT FOR TOROIDAL FIELD PROFILE g_hat FUNCTION
         
+        ########################
         # COMPUTATIONAL MESH
         self.ElType = ElementType           # TYPE OF ELEMENTS CONSTITUTING THE MESH: 1: TRIANGLES,  2: QUADRILATERALS
         self.ElOrder = ElementOrder         # ORDER OF MESH ELEMENTS: 1: LINEAR,   2: QUADRATIC
@@ -235,26 +245,24 @@ class GradShafranovCutFEM:
                     l[e]=el[:-1]
                     
             if l:  # LINE NOT EMPTY
-                if l[0] == 'PLASMA_BOUNDARY:':      # READ IF FIXED/FREE BOUNDARY PROBLEM
+                if l[0] == 'PLASMA_BOUNDARY:':        # READ IF FIXED/FREE BOUNDARY PROBLEM
                     self.PLASMA_BOUNDARY = l[1]
-                if l[0] == 'SOL_CASE:':             # READ SOLUTION CASE
+                elif l[0] == 'SOL_CASE:':             # READ SOLUTION CASE
                     self.CASE = l[1]
-                if l[0] == 'TOTAL_CURRENT:':        # READ TOTAL PLASMA CURRENT
+                elif l[0] == 'TOTAL_CURRENT:':        # READ TOTAL PLASMA CURRENT
                     self.TOTAL_CURRENT = float(l[1])
-                    
-                ### IF FIXED-BOUNDARY PROBLEM:
-                if self.PLASMA_BOUNDARY == "FIXED":
-                    # READ PLASMA GEOMETRY PARAMETERS
-                    if l[0] == 'R_MAX:':    # READ PLASMA REGION X_CENTER 
-                        self.Rmax = float(l[1])
-                    elif l[0] == 'R_MIN:':    # READ PLASMA REGION Y_CENTER 
-                        self.Rmin = float(l[1])
-                    elif l[0] == 'EPSILON:':    # READ PLASMA REGION X_MINOR 
-                        self.epsilon = float(l[1])
-                    elif l[0] == 'KAPPA:':    # READ PLASMA REGION X_MAYOR 
-                        self.kappa = float(l[1])
-                    elif l[0] == 'DELTA:':    # READ PLASMA REGION X_CENTER 
-                        self.delta = float(l[1])
+                
+                # READ PLASMA GEOMETRY PARAMETERS
+                elif l[0] == 'R_MAX:':    # READ PLASMA REGION X_CENTER 
+                    self.Rmax = float(l[1])
+                elif l[0] == 'R_MIN:':    # READ PLASMA REGION Y_CENTER 
+                    self.Rmin = float(l[1])
+                elif l[0] == 'EPSILON:':    # READ PLASMA REGION X_MINOR 
+                    self.epsilon = float(l[1])
+                elif l[0] == 'KAPPA:':    # READ PLASMA REGION X_MAYOR 
+                    self.kappa = float(l[1])
+                elif l[0] == 'DELTA:':    # READ PLASMA REGION X_CENTER 
+                    self.delta = float(l[1])
                     
                 ### IF FREE-BOUNDARY PROBLEM:
                 elif self.PLASMA_BOUNDARY == 'FREE':
@@ -276,24 +284,17 @@ class GradShafranovCutFEM:
                     elif l[0] == 'Y_TOP:':    # READ PLASMA REGION Y_CENTER 
                         self.Y_TOP = float(l[1])
                     
-                    
-                    # READ PLASMA GEOMETRY PARAMETERS
-                    if l[0] == 'X_CENTRE:':    # READ PLASMA REGION X_CENTER 
-                        self.X_CENTRE = float(l[1])
-                    elif l[0] == 'Y_CENTRE:':    # READ PLASMA REGION Y_CENTER 
-                        self.Y_CENTRE = float(l[1])
-                    elif l[0] == 'X_MINOR:':    # READ PLASMA REGION X_MINOR 
-                        self.X_MINOR = float(l[1])
-                    elif l[0] == 'X_MAYOR:':    # READ PLASMA REGION X_MAYOR 
-                        self.X_MAYOR = float(l[1])
-                    elif l[0] == 'YUP_MAYOR':    # READ PLASMA REGION X_CENTER 
-                        self.YUP_MAYOR = float(l[1])
-                    elif l[0] == 'XYUP_MAYOR':    # READ PLASMA REGION X_CENTER 
-                        self.XYUP_MAYOR = float(l[1])
-                    elif l[0] == 'YDO_MAYOR':    # READ PLASMA REGION X_CENTER 
-                        self.YDO_MAYOR = float(l[1])
-                    elif l[0] == 'XYDO_MAYOR':    # READ PLASMA REGION X_CENTER 
-                        self.XYDO_MAYOR = float(l[1])
+                    # READ PARAMETERS FOR PRESSURE AND TOROIDAL FIELD PROFILES
+                    elif l[0] == 'B0:':    # READ TOROIDAL FIELD MAGNITUDE ON MAGNETIC AXIS
+                        self.B0 = float(l[1])
+                    elif l[0] == 'q0:':    # READ TOKAMAK SAFETY FACTOR 
+                        self.q0 = float(l[1])
+                    elif l[0] == 'n_p:':    # READ EXPONENT FOR PRESSURE PROFILE p_hat FUNCTION 
+                        self.n_p = float(l[1])
+                    elif l[0] == 'g0:':    # READ TOROIDAL FIELD PROFILE FACTOR
+                        self.g0 = float(l[1])
+                    elif l[0] == 'n_g:':    # READ EXPONENT FOR TOROIDAL FIELD PROFILE g_hat FUNCTION
+                        self.n_g = float(l[1])
                         
                     # READ COIL PARAMETERS
                     elif l[0] == 'N_COILS:':    # READ PLASMA REGION X_CENTER 
@@ -339,10 +340,11 @@ class GradShafranovCutFEM:
                     self.INT_TOL = float(l[1])
                 elif l[0] == 'RELAXATION:':   # READ AITKEN'S SCHEME RELAXATION CONSTANT
                     self.alpha = float(l[1])
-                    
-        if self.PLASMA_BOUNDARY == "FIXED":
-            self.R0 = (self.Rmax+self.Rmin)/2      
             
+        self.R0 = (self.Rmax+self.Rmin)/2
+        if self.PLASMA_BOUNDARY == "FREE":
+            self.p0=self.B0*(self.kappa**2+1)/(self.mu0*self.R0**2*self.q0*self.kappa)
+             
         print('Done!')  
         return
     
@@ -388,7 +390,11 @@ class GradShafranovCutFEM:
             
         elif self.PLASMA_BOUNDARY == 'FREE': 
             if self.CASE == 'CASE0':
-                PHIexact = 0 
+                # DIMENSIONALESS COORDINATES
+                Xstar = X/self.R0
+                if not self.coeffs: 
+                    self.coeffs = self.ComputeLinearSolutionCoefficients()  # [D1, D2, D3]
+                PHIexact = (Xstar[0]**4)/8 + self.coeffs[0] + self.coeffs[1]*Xstar[0]**2 + self.coeffs[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2) 
             
         return PHIexact
     
@@ -414,6 +420,19 @@ class GradShafranovCutFEM:
                 jphi = -((self.coeffs[0]**2+self.coeffs[1]**2)*phi+(self.coeffs[0]/R)*np.cos(self.coeffs[0]*(R+self.coeffs[2]))*np.cos(self.coeffs[1]*Z)
                 +R*((np.sin(self.coeffs[0]*(R+self.coeffs[2]))*np.cos(self.coeffs[1]*Z))**2-phi**2+np.exp(-np.sin(self.coeffs[0]*(R+self.coeffs[2]))*
                                                                                             np.cos(self.coeffs[1]*Z))-np.exp(-phi)))/(self.mu0*R)
+        
+        elif self.PLASMA_BOUNDARY == "FREE":
+            # FUNCTION MODELLING PLASMA PRESSURE PROFILE
+            def funP(phi,pbarra0,n_p):
+                funp = -pbarra0*n_p*phi**(n_p-1)
+                return funp
+            # FUNCTION MODELLING TOROIDAL FIELD FUNCTION PROFILE
+            def funG(phi,gbarra0,n_g):
+                fung = -0.5 * gbarra0**2 * n_g* phi**(n_g-1)
+                return fung
+            # COMPUTE PLASMA CURRENT
+            jphi = -R * funP(phi,self.p0,self.n_p) - funG(phi,self.g0,self.n_g)/ (R*self.mu0) 
+                
         return jphi
     
     
@@ -637,22 +656,22 @@ class GradShafranovCutFEM:
                     self.PHI_B[i,column] += self.Icoils[icoil] * GreenFunction(Xnode,self.Xcoils[icoil,:]) 
                 
                 # CONTRIBUTION FROM EXTERNAL SOLENOIDS CURRENT  ->>  INTEGRATE OVER SOLENOID LENGTH 
-                for isole in range(self.Nsole):
-                    Xsolenoid = np.array([[self.Xsole[isole,0], self.Xsole[isole,1]],[self.Xsole[isole,0], self.Xsole[isole,2]]])   # COORDINATES OF SOLENOID EDGES
-                    Jsole = self.Isole[isole]*self.Nturnsole[isole]/np.linalg.norm(Xsolenoid[0,:]-Xsolenoid[1,:])   # SOLENOID CURRENT LINEAR DENSITY
+                for isole in range(self.Nsolenoids):
+                    Xsole = np.array([[self.Xsolenoids[isole,0], self.Xsolenoids[isole,1]],[self.Xsolenoids[isole,0], self.Xsolenoids[isole,2]]])   # COORDINATES OF SOLENOID EDGES
+                    Jsole = self.Isolenoids[isole]*self.Nturnssole[isole]/np.linalg.norm(Xsole[0,:]-Xsole[1,:])   # SOLENOID CURRENT LINEAR DENSITY
                     # LOOP OVER GAUSS NODES
                     for ig in range(self.Ng1D):
                         # MAPP 1D REFERENCE INTEGRATION GAUSS NODES TO PHYSICAL SPACE ON SOLENOID
-                        Xgsole = self.N1D[ig,:] @ Xsolenoid
+                        Xgsole = self.N1D[ig,:] @ Xsole
                         # COMPUTE DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL SOLENOID 
-                        detJ1D = Jacobian1D(Xsolenoid[0,:],Xsolenoid[1,:],self.dNdxi1D[ig,:])
-                        detJ1D = detJ1D*2*np.pi*self.Xsole[isole,0]
+                        detJ1D = Jacobian1D(Xsole[0,:],Xsole[1,:],self.dNdxi1D[ig,:])
+                        detJ1D = detJ1D*2*np.pi*np.mean(Xsole[:,0])
                         for k in range(self.nsole):
                             self.PHI_B[i,column] += GreenFunction(Xnode,Xgsole) * Jsole * self.N1D[ig,k] * detJ1D * self.Wg1D[ig]
                     
                 # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
                 #   1. INTEGRATE IN PLASMA ELEMENTS
-                for elem in self.PlasmaElements:
+                for elem in self.PlasmaElems:
                     # ISOLATE ELEMENT OBJECT
                     ELEMENT = self.Elements[elem]
                     # INTERPOLATE ELEMENTAL PHI ON PHYSICAL GAUSS NODES
@@ -664,7 +683,7 @@ class GradShafranovCutFEM:
                                                                     PHIg[ig])*ELEMENT.N[ig,k]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]
                             
                 #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
-                for elem in self.InterElements:
+                for elem in self.InterElems:
                     # ISOLATE ELEMENT OBJECT
                     ELEMENT = self.Elements[elem]
                     # INTEGRATE ON SUBELEMENT INSIDE PLASMA REGION
@@ -847,6 +866,9 @@ class GradShafranovCutFEM:
             self.PHI_X = self.Elements[elem].ElementalInterpolation(Xcrit,self.PHI[self.Elements[elem].Te])
             self.PHI_0 = 0
             
+        #if self.PLASMA_BOUNDARY == 'FIXED':
+        #    self.PHI_X = 0.1
+            
         return 
     
     
@@ -894,7 +916,7 @@ class GradShafranovCutFEM:
             # INTERPOLATE BOUNDARY PHI VALUE PHI_B ON BOUNDARY GAUSS INTEGRATION NODES
             PHI_Bg = np.zeros([ELEMENT.Nebound,ELEMENT.Ng1D])
             for edge in range(ELEMENT.Nebound):
-                PHI_Bg[edge,:] = ELEMENT.Nbound[edge,:,:] @ ELEMENT.PHI_Be[edge,:]
+                PHI_Bg[edge,:] = ELEMENT.Nbound[edge,:,:] @ ELEMENT.PHI_Be
             # COMPUTE ELEMENTAL MATRICES
             ELEMENT.IntegrateElementalBoundaryTerms(PHI_Bg,self.beta,self.LHS,self.RHS)
                 
@@ -997,7 +1019,7 @@ class GradShafranovCutFEM:
             # FOR FIXED PLASMA BOUNDARY, THE VACUUM VESSEL BOUNDARY PHI_B = 0, THUS SO ARE ALL ELEMENTAL VALUES  ->> PHI_Be = 0
             if self.PLASMA_BOUNDARY == 'FIXED':  
                 for elem in self.BoundaryElems:
-                    self.Elements[elem].PHI_Be = np.zeros([self.Elements[elem].Nebound,self.n])
+                    self.Elements[elem].PHI_Be = np.zeros([self.n])
             
             # FOR FREE PLASMA BOUNDARY, THE VACUUM VESSEL BOUNDARY PHI_B VALUES ARE COMPUTED FROM THE GRAD-SHAFRANOV OPERATOR'S GREEN FUNCTION
             # IN ROUTINE COMPUTEPHI_B, HERE WE NEED TO SEND TO EACH BOUNDARY ELEMENT THE PHI_B VALUES OF THEIR CORRESPONDING BOUNDARY NODES
@@ -1063,6 +1085,14 @@ class GradShafranovCutFEM:
         self.PHI_NORM[:,0] = self.InitialGuess()     
         return
     
+    def InitialiseElementalPHI_B(self):
+        # ASSIGN INITIAL GUESS PHI VALUES TO EACH ELEMENT
+        self.UpdateElementalPHI('PHI_NORM')
+        # FOR BOUNDARY ELEMENTS, INITIALISE ELEMENTAL ATTRIBUTE PHI_Be
+        for elem in self.BoundaryElems:
+            self.Elements[elem].PHI_Be = np.zeros([self.n])
+        return
+    
     
     def Initialization(self):
         """ Routine which initialises all the necessary elements in the problem """
@@ -1084,6 +1114,10 @@ class GradShafranovCutFEM:
         # CLASSIFY ELEMENTS  ->  OBTAIN PLASMAELEMS, VACUUMELEMS, INTERELEMS, BOUNDARYELEMS
         print("     -> CLASSIFY ELEMENTS...", end="")
         self.ClassifyElements()
+        print("Done!")
+        
+        print("     -> INITIALISE ELEMENTAL PHI VALUES...", end="")
+        self.InitialiseElementalPHI_B()
         print("Done!")
 
         # COMPUTE COMPUTATIONAL DOMAIN'S BOUNDARY EDGES

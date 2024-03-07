@@ -8,6 +8,7 @@ PHYSICAL_PROBLEM
    TOTAL_CURRENT:         100000.0 
 $   CTE_PLASMA:            100.0
    GEOMETRY:              AXYSIMETRICO   $ FULL3D 
+   
 $$ VACUUM VESSEL GEOMETRY: (ITER)                       
    R_MAX:       8.0       $ PLASMA REGION MAJOR RADIUS  
    R_MIN:       4.0       $ PLASMA REGION MINOR RADIUS

@@ -17,7 +17,7 @@ class Element:
         self.dim = len(Xe[0,:])                                         # SPATIAL DIMENSION
         self.Te = Te                                                    # ELEMENTAL CONNECTIVITIES
         self.LSe = LSe                                                  # ELEMENTAL NODAL LEVEL-SET VALUES
-        self.PHIe = None                                                # ELEMENTAL NODAL PHI VALUES
+        self.PHIe = np.zeros([self.n])                                  # ELEMENTAL NODAL PHI VALUES
         self.Dom = None                                                 # DOMAIN WHERE THE ELEMENT LIES (-1: "PLASMA"; +1: "VACUUM" ; 0: "INTERFACE")
         
         # INTEGRATION QUADRATURES ENTITIES (1D AND 2D)
