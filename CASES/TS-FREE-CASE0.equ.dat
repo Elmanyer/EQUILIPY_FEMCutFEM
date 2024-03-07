@@ -7,7 +7,18 @@ PHYSICAL_PROBLEM
    NUMMATERIALS:          1        $ 1>CHAMBER  2> CHAMBER+METAL 3<CHAMBER+METAL+VACUUM
    TOTAL_CURRENT:         100000.0 
 $   CTE_PLASMA:            100.0
-   GEOMETRY:              AXYSIMETRICO   $ FULL3D                        
+   GEOMETRY:              AXYSIMETRICO   $ FULL3D 
+
+   CONTROL_POINTS:        4
+   X_SADDLE:              5.5 
+   Y_SADDLE:              -2.7 
+   X_RIGHTMOST:           7.2
+   Y_RIGHTMOST:           0.2
+   X_LEFTMOST:            4.8
+   Y_LEFTMOST:            0.6
+   X_TOP:                 5.9
+   Y_TOP:                 2.4
+
    X_CENTRE:              1.5  
    Y_CENTRE:              0.0  
    X_MINOR:               1.097    
@@ -42,6 +53,36 @@ $   CTE_PLASMA:            100.0
    Yposi:   -7.4665  
    Inten:   1000.0
 
+   N_SOLENOIDS:          5
+   Xposi:   1.696
+   Ylow:    -5.415
+   Yup:     -3.6067
+   Turns:   553
+   Inten:   1000
+
+   Xposi:   1.696
+   Ylow:    -3.6067
+   Yup:     -1.7983
+   Turns:   553
+   Inten:   1000
+
+   Xposi:   1.696
+   Ylow:    -1.7983
+   Yup:     1.8183
+   Turns:   1106
+   Inten:   1000
+
+   Xposi:   1.696
+   Ylow:    1.8183
+   Yup:     3.6267
+   Turns:   553
+   Inten:   1000
+
+   Xposi:   1.696
+   Ylow:    3.6267
+   Yup:     5.435
+   Turns:   553
+   Inten:   1000
 
   PROPERTIES: 1
   MASS_DENSITY_1: 1.0

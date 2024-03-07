@@ -7,7 +7,7 @@ from scipy import optimize
 
 class Element:
     
-    def __init__(self,index,ElType,ElOrder,Xe,Te,LSe,PHIe):
+    def __init__(self,index,ElType,ElOrder,Xe,Te,LSe):
         
         self.index = index                                              # GLOBAL INDEX ON COMPUTATIONAL MESH
         self.ElType = ElType                                            # ELEMENT TYPE -> 0: SEGMENT ;  1: TRIANGLE  ; 2: QUADRILATERAL
@@ -17,13 +17,15 @@ class Element:
         self.dim = len(Xe[0,:])                                         # SPATIAL DIMENSION
         self.Te = Te                                                    # ELEMENTAL CONNECTIVITIES
         self.LSe = LSe                                                  # ELEMENTAL NODAL LEVEL-SET VALUES
-        self.PHIe = PHIe                                                # ELEMENTAL NODAL PHI VALUES
+        self.PHIe = None                                                # ELEMENTAL NODAL PHI VALUES
         self.Dom = None                                                 # DOMAIN WHERE THE ELEMENT LIES (-1: "PLASMA"; +1: "VACUUM" ; 0: "INTERFACE")
         
         # INTEGRATION QUADRATURES ENTITIES (1D AND 2D)
         self.Ng1D = None            # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 1D QUADRATURE
         self.XIg1D = None           # STANDARD 1D GAUSS INTEGRATION NODES 
         self.Wg1D = None            # STANDARD 1D GAUSS INTEGRATION WEIGTHS 
+        self.N1D = None             # REFERENCE 1D SHAPE FUNCTIONS EVALUATED AT STANDARD 1D GAUSS INTEGRATION NODES 
+        self.dNdxi1D = None         # REFERENCE 1D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT STANDARD 1D GAUSS INTEGRATION NODES
         self.Ng2D = None            # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 2D GAUSS QUADRATURE
         self.XIg2D = None           # STANDARD 2D GAUSS INTEGRATION NODES 
         self.Wg2D = None            # STANDARD 2D GAUSS INTEGRATION WEIGTHS
@@ -315,96 +317,18 @@ class Element:
         Input: - Tbound: # MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
         
         Relevant attributes: 
+            #   boundary: INDEX FOR COMPUTATIONAL DOMAIN'S BOUNDARY 
             #   Nebound: NUMBER OF BOUNDARY EDGES IN ELEMENT
             #   Tebound: BOUNDARY EDGES CONNECTIVITY MATRIX (LOCAL INDEXES) 
                 """
         
         # LOOK WHICH BOUNDARIES ARE ASSOCIATED TO THE ELEMENT
-        self.boundary = np.where(Tbound[:,-1] == self.index)[0] 
-        self.Nebound = len(self.boundary)
-        self.Tebound = np.zeros([self.Nebound,self.nedge], dtype=int)
+        self.boundary = np.where(Tbound[:,-1] == self.index)[0]         # GLOBAL INDEX FOR COMPUTATIONAL DOMAIN'S BOUNDARY ELEMENTAL EDGE
+        self.Nebound = len(self.boundary)                               # NUMBER OF ELEMENTAL EDGES ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
+        self.Tebound = np.zeros([self.Nebound,self.nedge], dtype=int)   # BOUNDARY EDGES CONNECTIVITY MATRIX (LOCAL INDEXES) 
         for boundedge, index in enumerate(self.boundary):
             for i in range(self.nedge):
                 self.Tebound[boundedge,i] = np.where(Tbound[index,i] == self.Te)[0][0]
-        return
-    
-    
-    def ComputeElementalPHI_B(self,Elements,PlasmaElements,InterElements,Jphi,Ncoils,Xcoils,Icoils):
-        
-        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B, ON BOUNDARY ELEMENT. 
-        THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
-        SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
-        FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
-        INTEGRATE THE PLASMA'S GREEN FUNCTION."""
-        
-        def ellipticK(k):
-            """ COMPLETE ELLIPTIC INTEGRAL OF 1rst KIND """
-            pk=1.0-k*k
-            if k == 1:
-                ellipticK=1.0e+16
-            else:
-                AK = (((0.01451196212*pk+0.03742563713)*pk +0.03590092383)*pk+0.09666344259)*pk+1.38629436112
-                BK = (((0.00441787012*pk+0.03328355346)*pk+0.06880248576)*pk+0.12498593597)*pk+0.5
-                ellipticK = AK-BK*np.log(pk)
-            return ellipticK
-
-        def ellipticE(k):
-            """COMPLETE ELLIPTIC INTEGRAL OF 2nd KIND"""
-            pk = 1 - k*k
-            if k == 1:
-                ellipticE = 1
-            else:
-                AE=(((0.01736506451*pk+0.04757383546)*pk+0.0626060122)*pk+0.44325141463)*pk+1
-                BE=(((0.00526449639*pk+0.04069697526)*pk+0.09200180037)*pk+0.2499836831)*pk
-                ellipticE = AE-BE*np.log(pk)
-            return ellipticE
-        
-        def GreenFunction(Xb,Xp):
-            """ GREEN FUNCTION CORRESPONDING TO THE TOROIDAL ELLIPTIC OPERATOR """
-            kcte= np.sqrt(4*Xb[0]*Xp[0]/((Xb[0]+Xp[0])**2 + (Xp[1]-Xb[1])**2))
-            Greenfun = (1/(2*np.pi))*(np.sqrt(Xp[0]*Xb[0])/kcte)*((2-kcte**2)*ellipticK(kcte)-2*ellipticE(kcte))
-            return Greenfun
-        
-        self.PHI_Be = np.zeros([self.Nebound,self.n])
-        
-        # COMPUTE VALUES OF PHI ON EACH BOUNDARY 
-        for i in range(self.Nebound):
-            # COMPUTE VALUES OF PHI ON EACH NODE
-            for j in range(self.nedge):
-                # ISOLATE NODAL COORDINATES
-                Xnode = self.Xe[self.Tebound[i,j],:]
-                # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
-                for icoil in range(Ncoils): 
-                    self.PHI_Be[i,self.Tebound[i,j]] += Icoils[icoil] * GreenFunction(Xnode,Xcoils[icoil,:]) 
-                    
-                # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
-                #   1. INTEGRATE IN PLASMA ELEMENTS
-                for elem in PlasmaElements:
-                    # ISOLATE ELEMENT OBJECT
-                    ELEMENT = Elements[elem]
-                    # INTERPOLATE ELEMENTAL PHI ON PHYSICAL GAUSS NODES
-                    PHIg = ELEMENT.N @ ELEMENT.PHIe
-                    # LOOP OVER GAUSS NODES
-                    for ig in range(ELEMENT.Ng2D):
-                        for k in range(ELEMENT.n):
-                            self.PHI_Be[i,self.Tebound[i,j]] += GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
-                                                                    PHIg[ig])*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]*ELEMENT.N[ig,k]
-                            
-                #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
-                for elem in InterElements:
-                    # ISOLATE ELEMENT OBJECT
-                    ELEMENT = Elements[elem]
-                    # INTEGRATE ON SUBELEMENT IN PLASMA REGION
-                    for SUBELEM in ELEMENT.SubElements:
-                        if SUBELEM.Dom < 0:  # IN PLASMA REGION
-                            # INTERPOLATE ELEMENTAL PHI ON PHYSICAL GAUSS NODES
-                            PHIg = SUBELEM.N @ ELEMENT.PHIe
-                            # LOOP OVER GAUSS NODES
-                            for ig in range(SUBELEM.Ng2D):
-                                for k in range(SUBELEM.n):
-                                    self.PHI_Be[i,self.Tebound[i,j]] += GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
-                                                                    PHIg[ig])*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*SUBELEM.N[ig,k]
-                                    
         return
         
         
@@ -467,7 +391,7 @@ class Element:
         self.XIg1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,Order)
         # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
         #### QUADRATURE TO INTEGRATE LINES (1D)
-        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.XIg1D, 0, Order-1, self.nedge)
+        self.N1D, self.dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.XIg1D, 0, Order-1, self.nedge)
         
         # PRECOMPUTE THE NECESSARY INTEGRATION ENTITIES EVALUATED AT THE STANDARD GAUSS INTEGRATION NODES ->> STANDARD FEM APPROACH
         # WE COMPUTE THUS:
@@ -488,15 +412,15 @@ class Element:
             for i in range(len(Xebound[:,0])):
                 XIbound = self.InverseMapping(Xebound[i,:])
             # MAP 1D REFERENCE STANDARD GAUSS INTEGRATION NODES ON REFERENCE BOUNDARY EDGE 
-            self.XIgbound[edge,:,:] = N1D @ XIbound
+            self.XIgbound[edge,:,:] = self.N1D @ XIbound
             # EVALUATE 2D REFERENCE SHAPE FUNCTION ON REFERENCE BOUNDARY EDGE GAUSS NODES
             self.Nbound[edge,:,:], self.dNdxibound[edge,:,:], self.dNdetabound[edge,:,:] = EvaluateReferenceShapeFunctions(self.XIgbound[edge,:,:], self.ElType, self.ElOrder, self.n)
             # COMPUTE MAPPED GAUSS NODES
-            self.Xgbound[edge,:,:] = N1D @ Xebound
+            self.Xgbound[edge,:,:] = self.N1D @ Xebound
             # COMPUTE JACOBIAN INVERSE AND DETERMINANT
             Rmeanbound = np.mean(Xebound[:,0])   # mean elemental radial position
             for ig in range(self.Ng1D):
-                self.detJgbound[edge,ig] = Jacobian1D(Xebound[:,0],Xebound[:,1],dNdxi1D[ig,:])  
+                self.detJgbound[edge,ig] = Jacobian1D(Xebound[:,0],Xebound[:,1],self.dNdxi1D[ig,:])  
                 self.detJgbound[edge,ig] *= 2*np.pi*Rmeanbound   # ACCOUNT FOR AXISYMMETRICAL
                 
         return
@@ -558,8 +482,7 @@ class Element:
         self.SubElements = [Element(index = subelem, ElType = self.ElType, ElOrder = self.ElOrder,
                                     Xe = self.Xemod[self.Temod[subelem,:]],
                                     Te = self.Te,
-                                    LSe = None,
-                                    PHIe = None) for subelem in range(self.Nsub)]
+                                    LSe = None) for subelem in range(self.Nsub)]
         
         # II. DETERMINE ON TO WHICH REGION (INSIDE OR OUTSIDE) FALLS EACH SUBELEMENT
         if self.LSe[self.permu[0]] < 0:  # COMMON NODE YIELD LS < 0 -> INSIDE REGION

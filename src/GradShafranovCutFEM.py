@@ -23,12 +23,36 @@ class GradShafranovCutFEM:
         self.case_file = EQU_case_file
         
         # DECLARE PROBLEM ATTRIBUTES
-        self.PLASMA_BOUNDARY = None
+        self.PLASMA_BOUNDARY = None         # PLASMA BOUNDARY BEHAVIOUR: 'FIXED'  or  'FREE'
         self.CASE = None                    # CASE SOLUTION
         self.PlasmaElems = None             # LIST OF ELEMENTS (INDEXES) INSIDE PLASMA REGION
         self.VacuumElems = None             # LIST OF ELEMENTS (INDEXES) OUTSIDE PLASMA REGION (VACUUM REGION)
         self.InterElems = None              # LIST OF CUT ELEMENTS (INDEXES), CONTAINING INTERFACE BETWEEN PLASMA AND VACUUM
         self.BoundaryElems = None           # LIST OF ELEMENTS (INDEXES) ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
+        self.LevelSet = None                # PLASMA REGION GEOMETRY LEVEL-SET FUNCTION NODAL VALUES
+        self.PHI = None                     # PHI SOLUTION FIELD OBTAINED BY SOLVING CutFEM SYSTEM
+        self.PHI_0 = None                   # PHI VALUE AT MAGNETIC AXIS MINIMA
+        self.PHI_X = None                   # PHI VALUE AT SADDLE POINT (PLASMA SEPARATRIX)
+        self.PHI_NORM = None                # NORMALISED PHI SOLUTION FIELD (INTERNAL LOOP) AT ITERATION N (COLUMN 0) AND N+1 (COLUMN 1) 
+        self.PHI_B = None                   # VACUUM VESSEL BOUNDARY PHI VALUES (EXTERNAL LOOP) AT ITERATION N (COLUMN 0) AND N+1 (COLUMN 1) 
+        self.PHI_CONV = None                # CONVERGED NORMALISED PHI SOLUTION FIELD  
+        
+        # PARAMETERS FOR COILS
+        self.Ncoils = None                  # TOTAL NUMBER OF COILS
+        self.Xcoils = None                  # COILS' COORDINATE MATRIX 
+        self.Icoils = None                  # COILS' CURRENT
+        # PARAMETERS FOR SOLENOIDS
+        self.Nsolenoids = None              # TOTAL NUMBER OF SOLENOIDS
+        self.Xsolenoids = None              # SOLENOIDS' COORDINATE MATRIX
+        self.Nturnssole = None              # SOLENOIDS' NUMBER OF TURNS
+        self.Isolenoids = None              # SOLENOIDS' CURRENT
+        # PLASMA REGION GEOMETRY
+        self.epsilon = None                 # PLASMA REGION ASPECT RATIO
+        self.kappa = None                   # PLASMA REGION ELONGATION
+        self.delta = None                   # PLASMA REGION TRIANGULARITY
+        self.Rmax = None                    # PLASMA REGION MAJOR RADIUS
+        self.Rmin = None                    # PLASMA REGION MINOR RADIUS
+        self.R0 = None                      # PLASMA REGION MEAN RADIUS
         
         # COMPUTATIONAL MESH
         self.ElType = ElementType           # TYPE OF ELEMENTS CONSTITUTING THE MESH: 1: TRIANGLES,  2: QUADRILATERALS
@@ -50,7 +74,14 @@ class GradShafranovCutFEM:
         self.Ymin = None                    # COMPUTATIONAL MESH MINIMAL Y (Z) COORDINATE
         
         # NUMERICAL TREATMENT PARAMETERS
-        self.QuadratureOrder = QuadratureOrder   # NUMERICAL INTEGRATION QUADRATURE ORDER 
+        self.QuadratureOrder = QuadratureOrder   # NUMERICAL INTEGRATION QUADRATURE ORDER
+        #### 1D NUMERICAL INTEGRATION QUADRATURE TO INTEGRATE ALONG SOLENOIDS 
+        self.Ng1D = None                         # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 1D QUADRATURE
+        self.XIg1D = None                        # STANDARD 1D GAUSS INTEGRATION NODES 
+        self.Wg1D = None                         # STANDARD 1D GAUSS INTEGRATION WEIGTHS 
+        self.N1D = None                          # REFERENCE 1D SHAPE FUNCTIONS EVALUATED AT STANDARD 1D GAUSS INTEGRATION NODES 
+        self.dNdxi1D = None                      # REFERENCE 1D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT STANDARD 1D GAUSS INTEGRATION NODES
+        #### DOBLE WHILE LOOP STRUCTURE PARAMETERS
         self.INT_TOL = None                      # INTERNAL LOOP STRUCTURE CONVERGENCE TOLERANCE
         self.EXT_TOL = None                      # EXTERNAL LOOP STRUCTURE CONVERGENCE TOLERANCE
         self.INT_ITER = None                     # INTERNAL LOOP STRUCTURE MAXIMUM ITERATIONS NUMBER
@@ -58,25 +89,13 @@ class GradShafranovCutFEM:
         self.converg_EXT = None                  # EXTERNAL LOOP STRUCTURE CONVERGENCE FLAG
         self.converg_INT = None                  # INTERNAL LOOP STRUCTURE CONVERGENCE FLAG
         self.it_EXT = None                       # EXTERNAL LOOP STRUCTURE ITERATIONS NUMBER
-        self_it_INT = None                       # INTERNAL LOOP STRUCTURE ITERATIONS NUMBER
+        self.it_INT = None                       # INTERNAL LOOP STRUCTURE ITERATIONS NUMBER
         self.it = 0                              # TOTAL NUMBER OF ITERATIONS COUNTER
         self.alpha = None                        # AIKTEN'S SCHEME RELAXATION CONSTANT
-        
-        # PARAMETERS FOR COILS
-        self.Ncoils = None              # TOTAL NUMBER OF COILS
-        self.Xcoils = None              # COILS' COORDINATE MATRIX 
-        self.Icoils = None              # COILS' CURRENT
-        
-        # PLASMA REGION GEOMETRY
-        self.epsilon = None                 # PLASMA REGION ASPECT RATIO
-        self.kappa = None                   # PLASMA REGION ELONGATION
-        self.delta = None                   # PLASMA REGION TRIANGULARITY
-        self.Rmax = None                    # PLASMA REGION MAJOR RADIUS
-        self.Rmin = None                    # PLASMA REGION MINOR RADIUS
-        self.R0 = None                      # PLASMA REGION MEAN RADIUS
-        
-        self.beta = 1e8                     # NITSCHE'S METHOD PENALTY TERM
-        self.coeffs = []                    # ANALYTICAL SOLUTION/INITIAL GUESS COEFFICIENTS
+        #### BOUNDARY CONSTRAINTS
+        self.beta = 1e8                          # NITSCHE'S METHOD PENALTY TERM
+        self.coeffs = []                         # ANALYTICAL SOLUTION/INITIAL GUESS COEFFICIENTS
+        self.nsole = 2                           # NUMBER OF NODES ON SOLENOID ELEMENT
         
         return
     
@@ -239,6 +258,25 @@ class GradShafranovCutFEM:
                     
                 ### IF FREE-BOUNDARY PROBLEM:
                 elif self.PLASMA_BOUNDARY == 'FREE':
+                    # READ PLASMA SHAPE CONTROL POINTS
+                    if l[0] == 'X_SADDLE:':    # READ PLASMA REGION X_CENTER 
+                        self.X_SADDLE = float(l[1])
+                    elif l[0] == 'Y_SADDLE:':    # READ PLASMA REGION Y_CENTER 
+                        self.Y_SADDLE = float(l[1])
+                    elif l[0] == 'X_RIGHTMOST:':    # READ PLASMA REGION X_CENTER 
+                        self.X_RIGHTMOST = float(l[1])
+                    elif l[0] == 'Y_RIGHTMOST:':    # READ PLASMA REGION Y_CENTER 
+                        self.Y_RIGHTMOST = float(l[1])
+                    elif l[0] == 'X_LEFTMOST:':    # READ PLASMA REGION X_CENTER 
+                        self.X_LEFTMOST = float(l[1])
+                    elif l[0] == 'Y_LEFTMOST:':    # READ PLASMA REGION Y_CENTER 
+                        self.Y_LEFTMOST = float(l[1])
+                    elif l[0] == 'X_TOP:':    # READ PLASMA REGION X_CENTER 
+                        self.X_TOP = float(l[1])
+                    elif l[0] == 'Y_TOP:':    # READ PLASMA REGION Y_CENTER 
+                        self.Y_TOP = float(l[1])
+                    
+                    
                     # READ PLASMA GEOMETRY PARAMETERS
                     if l[0] == 'X_CENTRE:':    # READ PLASMA REGION X_CENTER 
                         self.X_CENTRE = float(l[1])
@@ -256,19 +294,39 @@ class GradShafranovCutFEM:
                         self.YDO_MAYOR = float(l[1])
                     elif l[0] == 'XYDO_MAYOR':    # READ PLASMA REGION X_CENTER 
                         self.XYDO_MAYOR = float(l[1])
+                        
                     # READ COIL PARAMETERS
                     elif l[0] == 'N_COILS:':    # READ PLASMA REGION X_CENTER 
                         self.Ncoils = int(l[1])
                         self.Xcoils = np.zeros([self.Ncoils,self.dim])
                         self.Icoils = np.zeros([self.Ncoils])
                         i = 0
-                    elif l[0] == 'Xposi:':    # READ i-th COIL X POSITION
+                    elif l[0] == 'Xposi:' and i<self.Ncoils:    # READ i-th COIL X POSITION
                         self.Xcoils[i,0] = float(l[1])
-                    elif l[0] == 'Yposi:':    # READ i-th COIL Y POSITION
+                    elif l[0] == 'Yposi:' and i<self.Ncoils:    # READ i-th COIL Y POSITION
                         self.Xcoils[i,1] = float(l[1])
-                    elif l[0] == 'Inten:':    # READ i-th COIL INTENSITY
+                    elif l[0] == 'Inten:' and i<self.Ncoils:    # READ i-th COIL INTENSITY
                         self.Icoils[i] = float(l[1])
                         i += 1
+                        
+                    # READ SOLENOID PARAMETERS:
+                    elif l[0] == 'N_SOLENOIDS:':    # READ PLASMA REGION X_CENTER 
+                        self.Nsolenoids = int(l[1])
+                        self.Xsolenoids = np.zeros([self.Nsolenoids,self.dim+1])
+                        self.Nturnssole = np.zeros([self.Nsolenoids])
+                        self.Isolenoids = np.zeros([self.Nsolenoids])
+                        j = 0
+                    elif l[0] == 'Xposi:' and j<self.Nsolenoids:    # READ j-th SOLENOID X POSITION
+                        self.Xsolenoids[j,0] = float(l[1])
+                    elif l[0] == 'Ylow:' and j<self.Nsolenoids:    # READ j-th SOLENOID Y POSITION
+                        self.Xsolenoids[j,1] = float(l[1])
+                    elif l[0] == 'Yup:' and j<self.Nsolenoids:    # READ j-th SOLENOID Y POSITION
+                        self.Xsolenoids[j,2] = float(l[1])
+                    elif l[0] == 'Turns:' and j<self.Nsolenoids:    # READ j-th SOLENOID NUMBER OF TURNS
+                        self.Nturnssole[j] = float(l[1])
+                    elif l[0] == 'Inten:' and j<self.Nsolenoids:    # READ j-th SOLENOID INTENSITY
+                        self.Isolenoids[j] = float(l[1])
+                        j += 1
                     
                 # READ NUMERICAL TREATMENT PARAMETERS
                 if l[0] == 'EXT_ITER:':    # READ MAXIMAL NUMBER OF ITERATION FOR EXTERNAL LOOP
@@ -360,6 +418,268 @@ class GradShafranovCutFEM:
     
     
     ##################################################################################################
+    ###################################### LEVEL-SET DESCRIPTION #####################################
+    ##################################################################################################
+    
+    def F4E_LevelSet(self):
+        """ # IN ORDER TO FIND THE CURVE PARAMETRIZING THE PLASMA REGION BOUNDARY, WE LOOK FOR THE COEFFICIENTS DEFINING
+        # A 3rd ORDER HAMILTONIAN FROM WHICH WE WILL TAKE THE 0-LEVEL CURVE AS PLASMA REGION BOUNDARY. THAT IS
+        #
+        # H(x,y) = A00 + A10x + A01y + A20x**2 + A11xy + A02y**2 + A30x**3 + A21x**2y + A12xy**2 + A03y**3
+        # 
+        # HENCE, WE NEED TO IMPOSE CONSTRAINTS ON THE HAMILTONIAN FUNCTION IN ORDER TO SOLVE A SYSTEM OF EQUATIONS 
+        # (LINEAR OR NONLINEAR). THE RESULTING SYSTEM WILL READ AS   Ax = b.
+        # IN ORDER TO SIMPLIFY SUCH PROBLEM, WE ASSUME THAT:
+        #   - ORIGIN (0,0) ON 0-LEVEL CURVE ---> A00 = 0
+        #   - SADDLE POINT AT (0,0) ---> A10 = A01 = 0 
+        # EVEN IF THAT IS NOT THE CASE IN THE PHYSICAL PLASMA REGION, WE ONLY NEED TO TRANSLATE THE REFERENCE FRAME 
+        # RESPECT TO THE REAL SADDLE POINT LOCATION P0 IN ORDER TO WORK WITH EQUIVALENT PROBLEMS.
+        # FURTHERMORE, WE CAN NORMALISE RESPECT TO A20 WITHOUT LOSS OF GENERALITY. THEREFORE, WE DEPART FROM 
+        #
+        # H(x,y) = x**2 + A11xy + A02y**2 + A30x**3 + A21x**2y + A12xy**2 + A03y**3
+        # 
+        # AS MENTIONED EARLIER, THE PROFILE WILL CORRESPOND TO THE 0-LEVEL CURVE, WHICH MEANS WE MUST OBTAIN THE 
+        # COEFFICIENTS FOR 
+        #
+        # A11xy + A02y**2 + A30x**3 + A21x**2y + A12xy**2 + A03y**3 = -x**2
+        #
+        # WE NEED HENCE TO IMPOSE 6 CONSTRAINTS IN ORDER TO DETERMINE THE REMAINING COEFFICIENTS
+        
+        # For this method we constraint the curve to:
+        # - go through points P1, P2 and P3 (CONTROL POINTS)
+        # - have vertical tangents at points P1 and P2
+        # - have a 90º angle at saddle point
+        
+        # where the control points are defined as:
+        #      - P0: SADDLE POINT
+        #      - P1: RIGHTMOST POINT
+        #      - P2: LEFTMOST POINT
+        #      - P3: TOP POINT
+        
+        # Input: - P0: SADDLE POINT COORDINATES
+        #        - P1: RIGHTMOST POINT COORDINATES
+        #        - P2: LEFTMOST POINT COORDINATES
+        #        - P3: TOP POINT COORDINATES
+        #        - X: NODAL COORDINATES MATRIX
+        # """
+        
+        # THE FOLLOWING FUNCTIONS TRANSLATE THE CONSTRAINTS ON THE PROBLEM INTO EQUATIONS FOR THE FINAL SYSTEM OF EQUATIONS TO SOLVE
+        def Point_on_curve(P):
+            # Function returning the row coefficients in the system Ax=b corresponding to the equation 
+            # obtained when constraining the curve to pass through point P. Such equation corresponds 
+            # basically to   H(P) = 0.
+            x, y = P
+            Arow = [x*y, y**2, x**3, x**2*y, x*y**2, y**3]
+            brow = -x**2
+            return Arow, brow
+
+        def VerticalTangent(P):
+            # Function returning the row coefficients in the system Ax=b corresponding to the equation
+            # obtained when constraining the curve to have a vertical tangent at point P. Such equation  
+            # corresponds basically to   dH/dy(P) = 0.
+            x, y = P
+            Arow = [x, 2*y, 0, x**2, 2*x*y, 3*y**2]
+            brow = 0
+            return Arow, brow
+
+        def HorizontalTangent(P):
+            # Function returning the row coefficients in the system Ax=b corresponding to the equation
+            # obtained when constraining the curve to have a horizontal tangent at point P. Such equation  
+            # corresponds basically to   dH/dx(P) = 0.
+            x, y = P
+            Arow = [y, 0, 3*x**2, 2*x*y, y**2, 0]
+            brow = -2*x
+            return Arow, brow
+
+        def RightAngle_SaddlePoint(A,b):
+            # Function imposing a 90º angle at the closed surface saddle point at (0,0), which can be shown 
+            # is equivalent to fixing  A02 = -1
+            # Hence, what we need to do is take the second column of matrix A, corresponding to the A02 factors,
+            # multiply them by -1 and pass them to the system's RHS, vector b. Then, we will reduce the system size.
+            
+            bred = np.delete(b+A[:,1].reshape((6,1)),5,0)     # pass second column to RHS and delete last row
+            A = np.delete(A,1,1)    # delete second column 
+            Ared = np.delete(A,5,0)    # delete last row
+            return Ared, bred
+        
+        # BUILD CONTROL POINTS
+        P0 = np.array([self.X_SADDLE, self.Y_SADDLE])
+        P1 = np.array([self.X_RIGHTMOST, self.Y_RIGHTMOST])
+        P2 = np.array([self.X_LEFTMOST, self.Y_LEFTMOST])
+        P3 = np.array([self.X_TOP, self.Y_TOP])
+        
+        # 1. RESCALE POINT COORDINATES SO THAT THE SADDLE POINT IS LOCATED AT ORIGIN (0,0)
+        P1star = P1-P0
+        P2star = P2-P0
+        P3star = P3-P0
+
+        # 2. COMPUTE HAMILTONIAN COEFFICIENTS
+        # Build system matrices
+        A = np.zeros([6,6])
+        b = np.zeros([6,1])
+
+        # Constraints on point P1 = (a1,b1)
+        Arow11, brow11 = Point_on_curve(P1star)
+        Arow12, brow12 = VerticalTangent(P1star)
+        A[0,:] = Arow11
+        b[0] = brow11
+        A[1,:] = Arow12
+        b[1] = brow12
+
+        # Constraints on point P2 = (a2,b2)
+        Arow21, brow21 = Point_on_curve(P2star)
+        Arow22, brow22 = VerticalTangent(P2star)
+        A[2,:] = Arow21
+        b[2] = brow21
+        A[3,:] = Arow22
+        b[3] = brow22
+        
+        # Constraints on point P3 = (a3,b3)
+        Arow31, brow31 = Point_on_curve(P3star)
+        A[4,:] = Arow31
+        b[4] = brow31
+
+        # 90º on saddle point (0,0)
+        Ared, bred = RightAngle_SaddlePoint(A,b)   # Now A = [5x5] and  b = [5x1]
+        
+        # Solve system of equations and obtain Hamiltonian coefficients
+        Q, R = np.linalg.qr(Ared)
+        y = np.dot(Q.T, bred)
+        coeffs_red = np.linalg.solve(R, y)  # Hamiltonian coefficients  [5x1]
+        
+        coeffs = np.insert(coeffs_red,1,-1,0)        # insert second coefficient A02 = -1
+        
+        # 2. OBTAIN LEVEL-SET VALUES ON MESH NODES
+        # HAMILTONIAN  ->>  Z(x,y) = H(x,y) = x**2 + A11xy + A02y**2 + A30x**3 + A21x**2y + A12xy**2 + A03y**3
+        Xstar = self.X[:,0]-P0[0]
+        Ystar = self.X[:,1]-P0[1]
+        LS = np.zeros([self.Nn])
+        for i in range(self.Nn):
+            LS[i] = Xstar[i]**2+coeffs[0]*Xstar[i]*Ystar[i]+coeffs[1]*Ystar[i]**2+coeffs[2]*Xstar[i]**3+coeffs[3]*Xstar[i]**2*Ystar[i]+coeffs[4]*Xstar[i]*Ystar[i]**2+coeffs[5]*Ystar[i]**3
+
+        # MODIFY HAMILTONIAN VALUES SO THAT OUTSIDE THE PLASMA REGION THE LEVEL-SET IS POSITIVE  
+        for i in range(self.Nn):
+                if self.X[i,0] < P2[0] or self.X[i,1] < P0[1]:
+                    LS[i] = np.abs(LS[i])
+        return LS
+    
+    
+    
+    ##################################################################################################
+    ################################# VACUUM VESSEL BOUNDARY PHI_B ###################################
+    ##################################################################################################
+    
+    def ComputePHI_B(self,STEP):
+        
+        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B, ON BOUNDARY ELEMENT. 
+        THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
+        FOR 'FREE' BOUNDARY PROBLEM, SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
+        FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
+        INTEGRATE THE PLASMA'S GREEN FUNCTION."""
+        
+        def ellipticK(k):
+            """ COMPLETE ELLIPTIC INTEGRAL OF 1rst KIND """
+            pk=1.0-k*k
+            if k == 1:
+                ellipticK=1.0e+16
+            else:
+                AK = (((0.01451196212*pk+0.03742563713)*pk +0.03590092383)*pk+0.09666344259)*pk+1.38629436112
+                BK = (((0.00441787012*pk+0.03328355346)*pk+0.06880248576)*pk+0.12498593597)*pk+0.5
+                ellipticK = AK-BK*np.log(pk)
+            return ellipticK
+
+        def ellipticE(k):
+            """COMPLETE ELLIPTIC INTEGRAL OF 2nd KIND"""
+            pk = 1 - k*k
+            if k == 1:
+                ellipticE = 1
+            else:
+                AE=(((0.01736506451*pk+0.04757383546)*pk+0.0626060122)*pk+0.44325141463)*pk+1
+                BE=(((0.00526449639*pk+0.04069697526)*pk+0.09200180037)*pk+0.2499836831)*pk
+                ellipticE = AE-BE*np.log(pk)
+            return ellipticE
+        
+        def GreenFunction(Xb,Xp):
+            """ GREEN FUNCTION CORRESPONDING TO THE TOROIDAL ELLIPTIC OPERATOR """
+            kcte= np.sqrt(4*Xb[0]*Xp[0]/((Xb[0]+Xp[0])**2 + (Xp[1]-Xb[1])**2))
+            Greenfun = (1/(2*np.pi))*(np.sqrt(Xp[0]*Xb[0])/kcte)*((2-kcte**2)*ellipticK(kcte)-2*ellipticE(kcte))
+            return Greenfun
+        
+        """ RELEVANT ATTRIBUTES:
+                # Nbound: NUMBER OF COMPUTATIONAL DOMAIN'S BOUNDARIES (NUMBER OF ELEMENTAL EDGES)
+                # Nnbound: NUMBER OF NODES ON COMPUTATIONAL DOMAIN'S BOUNDARY
+                # BoundaryNodes: LIST OF NODES (GLOBAL INDEXES) ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
+                # Tbound: MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
+                # Ncoils: TOTAL NUMBER OF COILS
+                # Xcoils: COILS' COORDINATE MATRIX 
+                # Icoils: COILS' CURRENT
+                # Nsolenoids: TOTAL NUMBER OF SOLENOIDS
+                # Xsolenoids: SOLENOIDS' COORDINATE MATRIX
+                # Nturnssole: SOLENOIDS' NUMBER OF TURNS
+                # Isolenoids: SOLENOIDS' CURRENT"""
+                
+        if self.PLASMA_BOUNDARY == 'FIXED':  # FOR FIXED PLASMA BOUNDARY PROBLEM THE VACUUM VESSEL BOUNDARY VALUES PHI_B ARE IRRELEVANT ->> PHI_B = 0
+            return
+        
+        elif self.PLASMA_BOUNDARY == 'FREE':
+            if STEP == 'INITIALIZATION':
+                column = 0    # STORE VALUES IN FIRST COLUMN (ITERATION N)
+            elif STEP == 'ITERATION':
+                column = 1    # STORE VALUES IN SECOND COLUMN
+            
+            # COMPUTE PHI_B VALUE ON EACH VACUUM VESSEL BOUNDARY NODE (ITERATION N+1)
+            for i in range(self.Nnbound):
+                # ISOLATE NODAL COORDINATES
+                Xnode = self.X[self.BoundaryNodes[i],:]
+                
+                # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
+                for icoil in range(self.Ncoils): 
+                    self.PHI_B[i,column] += self.Icoils[icoil] * GreenFunction(Xnode,self.Xcoils[icoil,:]) 
+                
+                # CONTRIBUTION FROM EXTERNAL SOLENOIDS CURRENT  ->>  INTEGRATE OVER SOLENOID LENGTH 
+                for isole in range(self.Nsole):
+                    Xsolenoid = np.array([[self.Xsole[isole,0], self.Xsole[isole,1]],[self.Xsole[isole,0], self.Xsole[isole,2]]])   # COORDINATES OF SOLENOID EDGES
+                    Jsole = self.Isole[isole]*self.Nturnsole[isole]/np.linalg.norm(Xsolenoid[0,:]-Xsolenoid[1,:])   # SOLENOID CURRENT LINEAR DENSITY
+                    # LOOP OVER GAUSS NODES
+                    for ig in range(self.Ng1D):
+                        # MAPP 1D REFERENCE INTEGRATION GAUSS NODES TO PHYSICAL SPACE ON SOLENOID
+                        Xgsole = self.N1D[ig,:] @ Xsolenoid
+                        # COMPUTE DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL SOLENOID 
+                        detJ1D = Jacobian1D(Xsolenoid[0,:],Xsolenoid[1,:],self.dNdxi1D[ig,:])
+                        detJ1D = detJ1D*2*np.pi*self.Xsole[isole,0]
+                        for k in range(self.nsole):
+                            self.PHI_B[i,column] += GreenFunction(Xnode,Xgsole) * Jsole * self.N1D[ig,k] * detJ1D * self.Wg1D[ig]
+                    
+                # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
+                #   1. INTEGRATE IN PLASMA ELEMENTS
+                for elem in self.PlasmaElements:
+                    # ISOLATE ELEMENT OBJECT
+                    ELEMENT = self.Elements[elem]
+                    # INTERPOLATE ELEMENTAL PHI ON PHYSICAL GAUSS NODES
+                    PHIg = ELEMENT.N @ ELEMENT.PHIe
+                    # LOOP OVER GAUSS NODES
+                    for ig in range(ELEMENT.Ng2D):
+                        for k in range(ELEMENT.n):
+                            self.PHI_B[i,column] += GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
+                                                                    PHIg[ig])*ELEMENT.N[ig,k]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]
+                            
+                #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
+                for elem in self.InterElements:
+                    # ISOLATE ELEMENT OBJECT
+                    ELEMENT = self.Elements[elem]
+                    # INTEGRATE ON SUBELEMENT INSIDE PLASMA REGION
+                    for SUBELEM in ELEMENT.SubElements:
+                        if SUBELEM.Dom < 0:  # IN PLASMA REGION
+                            # INTERPOLATE ELEMENTAL PHI ON PHYSICAL GAUSS NODES
+                            PHIg = SUBELEM.N @ ELEMENT.PHIe
+                            # LOOP OVER GAUSS NODES
+                            for ig in range(SUBELEM.Ng2D):
+                                for k in range(SUBELEM.n):
+                                    self.PHI_B[i,column] += GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
+                                                                    PHIg[ig])*SUBELEM.N[ig,k]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]                   
+            return
+    
+    ##################################################################################################
     ###################################### ELEMENTS DEFINITION #######################################
     ##################################################################################################
     
@@ -417,7 +737,7 @@ class GradShafranovCutFEM:
     ############################### SOLUTION NORMALISATION ###########################################
     ##################################################################################################
     
-    def ComputeCriticalPHI(self,PHI):
+    def ComputeCriticalPHI(self):
         """ Function which computes the values of PHI at the:
                 - MAGNETIC AXIS ->> PHI_0 
                 - SEPARATRIX (LAST CLOSED MAGNETIC SURFACE) / SADDLE POINT ->> PHI_X 
@@ -441,11 +761,11 @@ class GradShafranovCutFEM:
         # DEFINE FINER STRUCTURED MESH
         Mr = 60
         Mz = 80
-        rfine = np.linspace(np.min(self.X[:,0]), np.max(self.X[:,0]), Mr)
-        zfine = np.linspace(np.min(self.X[:,1]), np.max(self.X[:,1]), Mz)
+        rfine = np.linspace(self.Xmin, self.Xmax, Mr)
+        zfine = np.linspace(self.Ymin, self.Ymax, Mz)
         # INTERPOLATE PHI VALUES
         Rfine, Zfine = np.meshgrid(rfine,zfine)
-        PHIfine = griddata((self.X[:,0],self.X[:,1]), PHI, (Rfine, Zfine), method='cubic')
+        PHIfine = griddata((self.X[:,0],self.X[:,1]), self.PHI.T[0], (Rfine, Zfine), method='cubic')
         
         # 2. COMPUTE NORM(GRAD(PHI)) WITH FINER MESH VALUES USING FINITE DIFFERENCES
         dr = (rfine[-1]-rfine[0])/Mr
@@ -517,28 +837,24 @@ class GradShafranovCutFEM:
                     break
             return elem
         
-        PHI_0 = 0
-        PHI_X = 0
         if nature == "LOCAL EXTREMUM":
             # FOR THE MAGNETIC AXIS VALUE PHI_0, THE LOCAL EXTREMUM SHOULD LIE INSIDE THE PLASMA REGION
             elem = SearchElement(self.Elements,Xcrit,self.PlasmaElems)
-            PHI_0 = self.Elements[elem].ElementalInterpolation(Xcrit,PHI[self.Elements[elem].Te])
+            self.PHI_0 = self.Elements[elem].ElementalInterpolation(Xcrit,self.PHI[self.Elements[elem].Te])
+            self.PHI_X = 0
         else:
             elem = SearchElement(self.Elements,Xcrit,self.VacuumElems)
-            PHI_X = self.Elements[elem].ElementalInterpolation(Xcrit,PHI[self.Elements[elem].Te])
-
-        return PHI_0, PHI_X
+            self.PHI_X = self.Elements[elem].ElementalInterpolation(Xcrit,self.PHI[self.Elements[elem].Te])
+            self.PHI_0 = 0
+            
+        return 
     
     
-    def NormalisePHI(self,PHI):
-        
-        PHI_0, PHI_X = self.ComputeCriticalPHI(PHI)
-        
-        PHIbar = np.zeros([self.Nn])
+    def NormalisePHI(self):
+        # NORMALISE SOLUTION OBTAINED FROM SOLVING CutFEM SYSTEM OF EQUATIONS USING CRITICAL PHI VALUES, PHI_0 AND PHI_X
         for i in range(self.Nn):
-            PHIbar[i] = (PHI[i]-PHI_X)/np.abs(PHI_0-PHI_X)
-        
-        return PHIbar
+            self.PHI_NORM[i,1] = (self.PHI[i]-self.PHI_X)/np.abs(self.PHI_0-self.PHI_X)
+        return 
     
     
     ##################################################################################################
@@ -619,18 +935,8 @@ class GradShafranovCutFEM:
         return 
     
     def SolveSystem(self):
-        
         # SOLVE LINEAR SYSTEM OF EQUATIONS AND OBTAIN PHI
-        self.PHI_inner1 = np.linalg.solve(self.LHS, self.RHS)
-        
-        # NORMALISE PHI ACCORDING TO OBTAINED PHI_0 AND PHI_X
-        PHIbar = self.NormalisePHI(self.PHI_inner1[:,0])
-        self.PHI_inner1 = np.zeros([self.Nn,1])
-        for node in range(self.Nn):
-            self.PHI_inner1[node] = PHIbar[node]
-            
-        self.PHI[:,self.it] = self.PHI_inner1[:,0]
-        
+        self.PHI = np.linalg.solve(self.LHS, self.RHS)
         return
     
     
@@ -638,39 +944,73 @@ class GradShafranovCutFEM:
     ############################### CONVERGENCE VALIDATION ###########################################
     ##################################################################################################
     
-    def CheckConvergence(self,loop):
+    def CheckConvergence(self,VALUES):
         
-        if loop == "INTERNAL":
+        if VALUES == "PHI_NORM":
             # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
-            if np.linalg.norm(self.PHI_inner1) > 0:
-                L2residu = np.linalg.norm(self.PHI_inner1 - self.PHI_inner0)/np.linalg.norm(self.PHI_inner1)
+            if np.linalg.norm(self.PHI_NORM[:,1]) > 0:
+                L2residu = np.linalg.norm(self.PHI_NORM[:,1] - self.PHI_NORM[:,0])/np.linalg.norm(self.PHI_NORM[:,1])
             else: 
-                L2residu = np.linalg.norm(self.PHI_inner1 - self.PHI_inner0)
+                L2residu = np.linalg.norm(self.PHI_NORM[:,1] - self.PHI_NORM[:,0])
             if L2residu < self.INT_TOL:
-                self.converg_INT = False   # STOP WHILE LOOP 
-                self.PHI_outer1 = self.PHI_inner1
+                self.converg_INT = True   # STOP INTERNAL WHILE LOOP 
             else:
-                self.converg_INT = True
-                self.PHI_inner0 = self.PHI_inner1
+                self.converg_INT = False
             
-        elif loop == "EXTERNAL":
+        elif VALUES == "PHI_B":
             # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
-            if np.linalg.norm(self.PHI_outer1) > 0:
-                L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)/np.linalg.norm(self.PHI_outer1)
+            if np.linalg.norm(self.PHI_B[:,1]) > 0:
+                L2residu = np.linalg.norm(self.PHI_B[:,1] - self.PHI_B[:,0])/np.linalg.norm(self.PHI_B[:,1])
             else: 
-                L2residu = np.linalg.norm(self.PHI_outer1 - self.PHI_outer0)
+                L2residu = np.linalg.norm(self.PHI_B[:,1] - self.PHI_B[:,0])
             if L2residu < self.EXT_TOL:
-                self.converg_EXT = False   # STOP WHILE LOOP 
-                self.PHI = self.PHI[:,:self.it+1]
-                self.PHI_converged = self.PHI_outer1
+                self.converg_EXT = True   # STOP EXTERNAL WHILE LOOP 
             else:
-                self.converg_EXT = True
-                self.PHI_outer0 = self.PHI_outer1
+                self.converg_EXT = False
         return 
     
-    def UpdateElementalPHI(self):
-        for element in self.Elements:
-            element.PHIe = self.PHI_inner1[element.Te]
+    def UpdatePHI(self,VALUES):
+        
+        if VALUES == 'PHI_NORM':
+            if self.converg_INT == False:
+                self.PHI_NORM[:,0] = self.PHI_NORM[:,1]
+            elif self.converg_INT == True:
+                pass
+        
+        elif VALUES == 'PHI_B':
+            if self.converg_EXT == False:
+                self.PHI_B[:,0] = self.PHI_B[:,1]
+                self.PHI_NORM[:,0] = self.PHI_NORM[:,1]
+            elif self.converg_EXT == True:
+                self.PHI_CONV = self.PHI_NORM[:,1]
+        
+        return
+    
+    def UpdateElementalPHI(self,VALUES):
+        """ Function to update the values of PHI_NORM or PHI_B in elements """
+        
+        if VALUES == 'PHI_NORM':
+            for element in self.Elements:
+                element.PHIe = self.PHI_NORM[element.Te,0]  # TAKE VALUES OF ITERATION N
+        
+        elif VALUES == 'PHI_B':
+            # FOR FIXED PLASMA BOUNDARY, THE VACUUM VESSEL BOUNDARY PHI_B = 0, THUS SO ARE ALL ELEMENTAL VALUES  ->> PHI_Be = 0
+            if self.PLASMA_BOUNDARY == 'FIXED':  
+                for elem in self.BoundaryElems:
+                    self.Elements[elem].PHI_Be = np.zeros([self.Elements[elem].Nebound,self.n])
+            
+            # FOR FREE PLASMA BOUNDARY, THE VACUUM VESSEL BOUNDARY PHI_B VALUES ARE COMPUTED FROM THE GRAD-SHAFRANOV OPERATOR'S GREEN FUNCTION
+            # IN ROUTINE COMPUTEPHI_B, HERE WE NEED TO SEND TO EACH BOUNDARY ELEMENT THE PHI_B VALUES OF THEIR CORRESPONDING BOUNDARY NODES
+            elif self.PLASMA_BOUNDARY == 'FREE':  
+                # FOR EACH NODE ON THE BOUNDARY
+                for i, nodeglobal in enumerate(self.BoundaryNodes):
+                    # 1. FIND THE BOUNDARY ELEMENTS IN WHICH THE BOUNDARY NODE IS LOCATED
+                    elems_index = self.Tbound[np.where(self.Tbound[:,:-1] == nodeglobal)[0], -1]
+                    for elem in elems_index:
+                        # 2. FIND THE LOCAL NODE CORRESPONDING TO THE BUNDARY NODE
+                        local_index = np.where(self.Elements[elem].Te == nodeglobal)[0][0]
+                        # 3. ASSIGN VALUE TO ELEMENTAL ATTRIBUTE
+                        self.Elements[elem].PHI_Be[local_index] = self.PHI_B[i,0]  # TAKE VALUES OF ITERATION N
         return
     
     
@@ -691,49 +1031,49 @@ class GradShafranovCutFEM:
     def InitialLevelSet(self):
         """ COMPUTE THE INITIAL LEVEL-SET FUNCTION VALUES DESCRIBING THE INITIAL PLASMA REGION GEOMETRY. 
             -> FIXED-BOUNDARY PROBLEM: Use the analytical solution for the LINEAR case as initial Level-Set function. The plasma region is characterised by a negative value of Level-Set.
-            -> FREE-BOUNDARY PROBLEM: """
+            -> FREE-BOUNDARY PROBLEM: DIFFERENT OPTIONS, WHERE THE PLASMA SHAPE IS DEFINED BY SOME CONTROL POINTS """
+            
+        self.LevelSet = np.zeros([self.Nn])
             
         if self.PLASMA_BOUNDARY == 'FIXED':
             # ADIMENSIONALISE MESH
             Xstar = self.X/self.R0
-            LS0 = np.zeros([self.Nn])
             coeffs = self.ComputeLinearSolutionCoefficients()
             for i in range(self.Nn):
-                LS0[i] = Xstar[i,0]**4/8 + coeffs[0] + coeffs[1]*Xstar[i,0]**2 + coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
+                self.LevelSet[i] = Xstar[i,0]**4/8 + coeffs[0] + coeffs[1]*Xstar[i,0]**2 + coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
                 
         elif self.PLASMA_BOUNDARY == 'FREE':
-            LS0 = np.zeros([self.Nn])
+            self.LevelSet = self.F4E_LevelSet()
             
-        return LS0
+        return 
     
     def InitialiseElements(self):
         """ Function initialising attribute ELEMENTS which is a list of all elements in the mesh. """
-        self.Elements = [Element(e,self.ElType,self.ElOrder,self.X[self.T[e,:],:],self.T[e,:],self.LevelSet[self.T[e,:]],self.PHI_inner0[self.T[e,:]]) for e in range(self.Ne)]
+        self.Elements = [Element(e,self.ElType,self.ElOrder,self.X[self.T[e,:],:],self.T[e,:],self.LevelSet[self.T[e,:]]) for e in range(self.Ne)]
         return
     
     def InitialisePHI(self):  
         """ INITIALISE PHI VECTORS WHERE THE DIFFERENT SOLUTIONS WILL BE STORED ITERATIVELY DURING THE SIMULATION AND COMPUTE INITIAL GUESS."""
         # INITIALISE PHI VECTORS
-        self.PHI_INT = np.zeros([self.Nn,2])      # INTERNAL LOOP SOLUTION AT INTARTIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
-        self.PHI_EXT = np.zeros([self.Nn,2])      # EXTERNAL LOOP SOLUTION AT INTARTIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
-        self.PHI_CONV = np.zeros([self.Nn])       # CONVERGED SOLUTION 
-        # COMPUTE INITIAL GUESS AND STORE IT FOR BOTH INTERNAL AND EXTERNAL SOLUTIONS FOR N=0
-        PHI0 = self.InitialGuess()
-        self.PHI_INT[:,0] = PHI0     
-        self.PHI_EXT[:,0] = PHI0
+        self.PHI = np.zeros([self.Nn])            # SOLUTION FROM SOLVING CutFEM SYSTEM OF EQUATIONS (INTERNAL LOOP)       
+        self.PHI_NORM = np.zeros([self.Nn,2])     # NORMALISED PHI SOLUTION FIELD (INTERNAL LOOP) AT ITERATIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
+        self.PHI_B = np.zeros([self.Nnbound,2])   # VACUUM VESSEL BOUNDARY PHI VALUES (EXTERNAL LOOP) AT ITERATIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
+        self.PHI_CONV = np.zeros([self.Nn])       # CONVERGED SOLUTION FIELD
+        # COMPUTE INITIAL GUESS AND STORE IT IN INTERNAL SOLUTION FOR N=0
+        self.PHI_NORM[:,0] = self.InitialGuess()     
         return
     
     
     def Initialization(self):
         """ Routine which initialises all the necessary elements in the problem """
-        # INITIALISE VARIABLES
+        # INITIALISE PHI VARIABLES
         print("     -> COMPUTE INITIAL GUESS...", end="")
         self.InitialisePHI()
         print('Done!')
 
         # INITIALISE LEVEL-SET FUNCTION
         print("     -> INITIALISE LEVEL-SET...", end="")
-        self.LevelSet = self.InitialLevelSet()
+        self.InitialLevelSet()
         print('Done!')
 
         # INITIALISE ELEMENTS 
@@ -771,6 +1111,10 @@ class GradShafranovCutFEM:
         self.ComputeIntegrationQuadratures()
         print('Done!')
         
+        # COMPUTE NUMERICAL INTEGRATION QUADRATURES
+        print('     -> COMPUTE INITIAL VACUUM VESSEL BOUNDARY VALUES PHI_B...', end="")
+        self.ComputePHI_B('INITIALIZATION')
+        print('Done!')
         return
 
     
@@ -796,29 +1140,6 @@ class GradShafranovCutFEM:
                 scalarprod = np.dot(dir,self.Elements[elem].NormalVec[edge,:])
             if scalarprod > 1e-10: 
                 raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
-        return
-    
-    def ComputeBoundaryPHI(self):
-        
-        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PHI, PHI_B. 
-        THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
-        SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
-        FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
-        INTEGRATE THE PLASMA'S GREEN FUNCTION.
-
-        IN ORDER TO SOLVE A FIXED VALUE PROBLEM INSIDE THE COMPUTATIONAL DOMAIN, THE BOUNDARY VALUES
-        PHI_B MUST COMPUTED FROM THE PREVIOUS SOLUTION FOR PHIPOL.  """
-        
-        # FOR FIXED PLASMA BOUNDARY, THE COMPUTATIONAL DOMAIN BOUNDARY PHI VALUES ARE IRRELEVANT, AS THE PLASMA REGION SHAPE IS ALREADY DEFINED
-        if self.PLASMA_BOUNDARY == 'FIXED':  
-            for elem in self.BoundaryElems:
-                self.Elements[elem].PHI_Be = np.zeros([self.Elements[elem].Nebound,self.n])
-        
-        # FOR FREE PLASMA BOUNDARY, THE COMPUTATIONAL DOMAIN BOUNDARY PHI VALUES ARE COMPUTED FROM THE GRAD-SHAFRANOV OPERATOR'S GREEN FUNCTION
-        elif self.PLASMA_BOUNDARY == 'FREE':  
-            for elem in self.BoundaryElems:
-                self.Elements[elem].ComputeElementalPHI_B(self.Elements,self.PlasmaElems,self.InterElems,self.Jphi,self.Ncoils,self.Xcoils,self.Icoils)
-            
         return
     
     ##################### OPERATIONS ON INTERFACE ON CUT ELEMENTS ################################
@@ -860,6 +1181,13 @@ class GradShafranovCutFEM:
         # COMPUTE MODIFIED QUADRATURE ENTITIES FOR INTERFACE ELEMENTS
         for elem in self.InterElems:
             self.Elements[elem].ComputeModifiedQuadratures(self.QuadratureOrder)
+            
+        # COMPUTE 1D NUMERICAL INTEGRATION QUADRATURES TO INTEGRATE ALONG SOLENOIDS
+        #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
+        self.XIg1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,self.QuadratureOrder)
+        # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
+        #### QUADRATURE TO INTEGRATE LINES (1D)
+        self.N1D, self.dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.XIg1D, 0, self.QuadratureOrder-1, self.nsole)
         return
     
     
@@ -881,27 +1209,34 @@ class GradShafranovCutFEM:
 
         # START DOBLE LOOP STRUCTURE
         print('START ITERATION...')
-        self.converg_EXT = True
+        self.converg_EXT = False
         self.it_EXT = 0
         self.it = 0
-        while (self.converg_EXT == True and self.it_EXT < self.EXT_ITER):
+        while (self.converg_EXT == False and self.it_EXT < self.EXT_ITER):
             self.it_EXT += 1
-            self.converg_INT = True
+            self.converg_INT = False
             self.it_INT = 0
-            while (self.converg_INT == True and self.it_INT < self.INT_ITER):
+            #****************************************
+            self.UpdateElementalPHI('PHI_B')
+            while (self.converg_INT == False and self.it_INT < self.INT_ITER):
                 self.it_INT += 1
                 self.it += 1
                 print('OUTER ITERATION = '+str(self.it_EXT)+' , INNER ITERATION = '+str(self.it_INT))
-                self.ComputeBoundaryPHI()
-                self.AssembleGlobalSystem()
-                self.SolveSystem()
-                self.UpdateElementalPHI()
-                self.CheckConvergence("INTERNAL")
-                
-            self.CheckConvergence("EXTERNAL")
-
-        self.PlotSolution(self.PHI_converged,colorbar=True)
-        
+                ##################################
+                self.UpdateElementalPHI('PHI_NORM')   # UPDATE PHI_NORM VALUES IN CORRESPONDING ELEMENTS
+                self.AssembleGlobalSystem()  
+                self.SolveSystem()                    # 1. SOLVE CutFEM SYSTEM  ->> PHI
+                self.ComputeCriticalPHI()             # 2. COMPUTE CRITICAL VALUES   PHI_0 AND PHI_X
+                self.NormalisePHI()                   # 3. NORMALISE PHI RESPECT TO CRITICAL VALUES  ->> PHI_NORM 
+                self.CheckConvergence('PHI_NORM')     # 4. CHECK CONVERGENCE OF PHI_NORM FIELD
+                self.UpdatePHI('PHI_NORM')            # 5. UPDATE PHI_NORM VALUES 
+                ##################################
+            self.ComputePHI_B('ITERATION')            # COMPUTE BOUNDARY VALUES PHI_B WITH INTERNALLY CONVERGED PHI_NORM
+            self.CheckConvergence('PHI_B')            # CHECK CONVERGENCE OF BOUNDARY PHI VALUES  (PHI_B)
+            self.UpdatePHI('PHI_B')                   # UPDATE PHI_NORM AND PHI_B VALUES
+            #****************************************
+        print('SOLUTION CONVERGED')
+        self.PlotSolution(self.PHI_CONV,colorbar=True)
         return
     
     

@@ -24,7 +24,7 @@ $------------------------------------------------------------
 NUMERICAL_TREATMENT                           
   EXT_ITER:     10
   EXT_TOL:      1.0e-3  
-  INT_ITER:     10
+  INT_ITER:     20
   INT_TOL:      1.0e-3  
   RELAXATION:   1.0 
 
