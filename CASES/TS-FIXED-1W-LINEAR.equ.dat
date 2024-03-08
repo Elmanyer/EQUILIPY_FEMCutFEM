@@ -2,13 +2,16 @@ $------------------------------------------------------------
 PHYSICAL_PROBLEM  
 
    PLASMA_BOUNDARY:    FIXED
-   SOL_CASE:           NONLINEAR
+   PLASMA_GEOMETRY:    FIRST_WALL
+   PLASMA_CURRENT:     LINEAR
+   VACUUM_VESSEL:      RECTANGLE
  
    NUMMATERIALS:          1        $ 1>CHAMBER  2> CHAMBER+METAL 3<CHAMBER+METAL+VACUUM
    TOTAL_CURRENT:         100000.0 
 $   CTE_PLASMA:            100.0
-   GEOMETRY:              AXYSIMETRICO   $ FULL3D   
-$$ VACUUM VESSEL GEOMETRY: (ITER)                      
+   GEOMETRY:              AXYSIMETRICO   $ FULL3D 
+   
+$$ VACUUM VESSEL GEOMETRY: (ITER)                       
    R_MAX:       8.0       $ PLASMA REGION MAJOR RADIUS  
    R_MIN:       4.0       $ PLASMA REGION MINOR RADIUS
    EPSILON:     0.32      $ PLASMA REGION INVERSE ASPECT RATIO
@@ -22,11 +25,12 @@ $$ VACUUM VESSEL GEOMETRY: (ITER)
 END_PHYSICAL_PROBLEM                                                                  
 $------------------------------------------------------------                         
 NUMERICAL_TREATMENT                           
-  EXT_ITER:     10
-  EXT_TOL:      1.0e-3  
-  INT_ITER:     10
-  INT_TOL:      1.0e-3  
-  RELAXATION:   1.0 
+  EXT_ITER:     10        $ EXTERNAL LOOP (PHI_B) MAXIMUM ITERATIONS
+  EXT_TOL:      1.0e-3    $ EXTERNAL LOOP (PHI_B) CONVERGENCE TOLERANCE
+  INT_ITER:     20        $ INTERNAL LOOP (PHI_NORM) MAXIMUM ITERATIONS
+  INT_TOL:      1.0e-3    $ INTERNAL LOOP (PHI_NORM) CONVERGENCE TOLERANCE
+  BETA:         1.0e10    $ NITSCHE'S METHOD PENALTY PARAMETER
+  RELAXATION:   1.0       $ AIKITEN'S METHOD RELAXATION PARAMETER
 
   ! OJO guillaume ??                               
   ALGEBRAIC_SOLVER     

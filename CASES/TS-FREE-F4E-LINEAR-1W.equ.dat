@@ -1,0 +1,129 @@
+$------------------------------------------------------------                         
+PHYSICAL_PROBLEM  
+
+   PLASMA_BOUNDARY:    FREE
+   PLASMA_GEOMETRY:    F4E
+   PLASMA_CURRENT:     LINEAR
+   VACUUM_VESSEL:      FIRST_WALL
+ 
+   NUMMATERIALS:          1        $ 1>CHAMBER  2> CHAMBER+METAL 3<CHAMBER+METAL+VACUUM
+   TOTAL_CURRENT:         100000.0 
+$   CTE_PLASMA:            100.0
+   GEOMETRY:              AXYSIMETRICO   $ FULL3D
+
+$$ VACUUM VESSEL GEOMETRY: (ITER)                       
+   R_MAX:       8.0       $ PLASMA REGION MAJOR RADIUS  
+   R_MIN:       4.0       $ PLASMA REGION MINOR RADIUS
+   EPSILON:     0.32      $ PLASMA REGION INVERSE ASPECT RATIO
+   KAPPA:       1.7       $ PLASMA REGION ELONGATION
+   DELTA:       0.33      $ PLASMA REGION TRIANGULARITY
+
+$$ PLASMA REGION GEOMETRY: (ITER)
+   CONTROL_POINTS:        4
+   X_SADDLE:              5.5 
+   Y_SADDLE:              -2.7 
+   X_RIGHTMOST:           7.2
+   Y_RIGHTMOST:           0.2
+   X_LEFTMOST:            4.8
+   Y_LEFTMOST:            0.6
+   X_TOP:                 5.9
+   Y_TOP:                 2.4
+
+$$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
+   N_COILS:              6
+   Xposi:   3.9431
+   Yposi:   7.5741    
+   Inten:   200.0
+
+   Xposi:   8.2851
+   Yposi:   6.5398   
+   Inten:   200.0
+
+   Xposi:   11.9919
+   Yposi:   3.2752  
+   Inten:   400.0
+
+   Xposi:   11.9630
+   Yposi:   -2.2336  
+   Inten:   400.0
+
+   Xposi:   8.3908
+   Yposi:   -6.7269  
+   Inten:   200.0
+
+   Xposi:   4.3340
+   Yposi:   -7.4665  
+   Inten:   200.0
+
+   N_SOLENOIDS:          5
+   Xposi:   1.696
+   Ylow:    -5.415
+   Yup:     -3.6067
+   Turns:   553
+   Inten:   100
+
+   Xposi:   1.696
+   Ylow:    -3.6067
+   Yup:     -1.7983
+   Turns:   553
+   Inten:   100
+
+   Xposi:   1.696
+   Ylow:    -1.7983
+   Yup:     1.8183
+   Turns:   1106
+   Inten:   100
+
+   Xposi:   1.696
+   Ylow:    1.8183
+   Yup:     3.6267
+   Turns:   553
+   Inten:   100
+
+   Xposi:   1.696
+   Ylow:    3.6267
+   Yup:     5.435
+   Turns:   553
+   Inten:   100
+
+  PROPERTIES: 1
+  MASS_DENSITY_1: 1.0
+  NUMBER_DENSITY_1: 1.0
+                                                  
+END_PHYSICAL_PROBLEM                                                                  
+$------------------------------------------------------------                         
+NUMERICAL_TREATMENT                           
+  EXT_ITER:     10        $ EXTERNAL LOOP (PHI_B) MAXIMUM ITERATIONS
+  EXT_TOL:      1.0e-3    $ EXTERNAL LOOP (PHI_B) CONVERGENCE TOLERANCE
+  INT_ITER:     20        $ INTERNAL LOOP (PHI_NORM) MAXIMUM ITERATIONS
+  INT_TOL:      1.0e-3    $ INTERNAL LOOP (PHI_NORM) CONVERGENCE TOLERANCE
+  BETA:         1.0e10    $ NITSCHE'S METHOD PENALTY PARAMETER
+  RELAXATION:   1.0       $ AIKITEN'S METHOD RELAXATION PARAMETER 
+
+  ! OJO guillaume ??                               
+  ALGEBRAIC_SOLVER     
+    SOLVER:                GMRES, KRYLOV=20
+    CONVERGENCE:           ITERA=10000, TOLER=1.0e-10, ADAPTIVE, RATIO=1.0e-3
+    OUTPUT:                CONVERGENCE
+    PRECONDITIONER:        DIAGONAL
+  END_ALGEBRAIC_SOLVER        
+
+END_NUMERICAL_TREATMENT                                                         
+$------------------------------------------------------------
+OUTPUT_&_POST_PROCESS  
+
+  POSTPROCESS PHIPOL,  STEPS=1
+$  POSTPROCESS CURRENT, STEPS=1
+  POSTPROCESS BFIELD,  STEPS=1
+$  POSTPROCESS AFIELD,  STEPS=1
+$  POSTPROCESS PRESS,  STEPS=1
+
+END_OUTPUT_&_POST_PROCESS  
+$------------------------------------------------------------
+BOUNDARY_CONDITIONS
+   CODES, NODES
+     1 5 1.0
+     2 1 0.0
+   END_CODES
+END_BOUNDARY_CONDITIONS  
+$------------------------------------------------------------

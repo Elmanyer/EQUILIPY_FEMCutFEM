@@ -103,7 +103,7 @@ class GradShafranovCutFEM:
         self.it = 0                              # TOTAL NUMBER OF ITERATIONS COUNTER
         self.alpha = None                        # AIKTEN'S SCHEME RELAXATION CONSTANT
         #### BOUNDARY CONSTRAINTS
-        self.beta = 1e8                          # NITSCHE'S METHOD PENALTY TERM
+        self.beta = None                         # NITSCHE'S METHOD PENALTY TERM
         self.coeffs = []                         # ANALYTICAL SOLUTION/INITIAL GUESS COEFFICIENTS
         self.nsole = 2                           # NUMBER OF NODES ON SOLENOID ELEMENT
         
@@ -223,13 +223,116 @@ class GradShafranovCutFEM:
     
     def ReadEQUILIdata(self):
         """ Reads problem data from input file equ.dat. That is:
-                - SOLUTION CASE AND PROBLEM TYPE (FIXED/FREE BOUNDARY)
+                - PLASMA BOUNDARY (FIXED/FREE BOUNDARY)
+                - PLASMA REGION GEOMETRY (USE 1srt WALL OR TRUE F4E SHAPE)
+                - PLASMA CURRENT MODELISATION
+                - VACUUM VESSEL CONSIDERED GEOMETRY
                 - TOTAL CURRENT
-                - PLASMA GEOMETRY DATA
+                - GEOMETRICAL PARAMETERS
                 - LOCATION AND CURRENT OF EXTERNAL COILS CONFINING THE PLASMA
                 - PLASMA PROPERTIES
-                - NUMERICAL TREATMENT
+                - NUMERICAL TREATMENT PARAMETERS
                 """
+        
+        #############################################
+        # INTER-CODE FUNCTIONS TO READ INPUT PARAMETERS BY BLOCKS 
+        
+        def BlockFirstWall(self,line):
+            if line[0] == 'R_MAX:':          # READ TOKAMAK FIRST WALL MAJOR RADIUS 
+                self.Rmax = float(line[1])
+            elif line[0] == 'R_MIN:':        # READ TOKAMAK FIRST WALL MINOR RADIUS 
+                self.Rmin = float(line[1])
+            elif line[0] == 'EPSILON:':      # READ TOKAMAK FIRST WALL INVERSE ASPECT RATIO
+                self.epsilon = float(line[1])
+            elif line[0] == 'KAPPA:':        # READ TOKAMAK FIRST WALL ELONGATION 
+                self.kappa = float(line[1])
+            elif line[0] == 'DELTA:':        # READ TOKAMAK FIRST WALL TRIANGULARITY 
+                self.delta = float(line[1])
+            return
+        
+        def BlockF4E(self,line):
+            # READ PLASMA SHAPE CONTROL POINTS
+            if line[0] == 'X_SADDLE:':    # READ PLASMA REGION X_CENTER 
+                self.X_SADDLE = float(line[1])
+            elif line[0] == 'Y_SADDLE:':    # READ PLASMA REGION Y_CENTER 
+                self.Y_SADDLE = float(line[1])
+            elif line[0] == 'X_RIGHTMOST:':    # READ PLASMA REGION X_CENTER 
+                self.X_RIGHTMOST = float(line[1])
+            elif line[0] == 'Y_RIGHTMOST:':    # READ PLASMA REGION Y_CENTER 
+                self.Y_RIGHTMOST = float(line[1])
+            elif line[0] == 'X_LEFTMOST:':    # READ PLASMA REGION X_CENTER 
+                self.X_LEFTMOST = float(line[1])
+            elif line[0] == 'Y_LEFTMOST:':    # READ PLASMA REGION Y_CENTER 
+                self.Y_LEFTMOST = float(line[1])
+            elif line[0] == 'X_TOP:':    # READ PLASMA REGION X_CENTER 
+                self.X_TOP = float(line[1])
+            elif line[0] == 'Y_TOP:':    # READ PLASMA REGION Y_CENTER 
+                self.Y_TOP = float(line[1])
+            return
+        
+        def BlockExternalMagnets(self,line):
+            if line[0] == 'N_COILS:':    # READ PLASMA REGION X_CENTER 
+                self.Ncoils = int(line[1])
+                self.Xcoils = np.zeros([self.Ncoils,self.dim])
+                self.Icoils = np.zeros([self.Ncoils])
+                i = 0
+            elif line[0] == 'Xposi:' and i<self.Ncoils:    # READ i-th COIL X POSITION
+                self.Xcoils[i,0] = float(line[1])
+            elif line[0] == 'Yposi:' and i<self.Ncoils:    # READ i-th COIL Y POSITION
+                self.Xcoils[i,1] = float(line[1])
+            elif line[0] == 'Inten:' and i<self.Ncoils:    # READ i-th COIL INTENSITY
+                self.Icoils[i] = float(line[1])
+                i += 1
+                
+            # READ SOLENOID PARAMETERS:
+            elif l[0] == 'N_SOLENOIDS:':    # READ PLASMA REGION X_CENTER 
+                self.Nsolenoids = int(l[1])
+                self.Xsolenoids = np.zeros([self.Nsolenoids,self.dim+1])
+                self.Nturnssole = np.zeros([self.Nsolenoids])
+                self.Isolenoids = np.zeros([self.Nsolenoids])
+                j = 0
+            elif line[0] == 'Xposi:' and j<self.Nsolenoids:    # READ j-th SOLENOID X POSITION
+                self.Xsolenoids[j,0] = float(line[1])
+            elif line[0] == 'Ylow:' and j<self.Nsolenoids:    # READ j-th SOLENOID Y POSITION
+                self.Xsolenoids[j,1] = float(line[1])
+            elif line[0] == 'Yup:' and j<self.Nsolenoids:    # READ j-th SOLENOID Y POSITION
+                self.Xsolenoids[j,2] = float(line[1])
+            elif line[0] == 'Turns:' and j<self.Nsolenoids:    # READ j-th SOLENOID NUMBER OF TURNS
+                self.Nturnssole[j] = float(line[1])
+            elif line[0] == 'Inten:' and j<self.Nsolenoids:    # READ j-th SOLENOID INTENSITY
+                self.Isolenoids[j] = float(line[1])
+                j += 1
+            return
+        
+        def BlockProfiles(self,line):
+            if line[0] == 'B0:':    # READ TOROIDAL FIELD MAGNITUDE ON MAGNETIC AXIS
+                self.B0 = float(line[1])
+            elif line[0] == 'q0:':    # READ TOKAMAK SAFETY FACTOR 
+                self.q0 = float(line[1])
+            elif line[0] == 'n_p:':    # READ EXPONENT FOR PRESSURE PROFILE p_hat FUNCTION 
+                self.n_p = float(line[1])
+            elif line[0] == 'g0:':    # READ TOROIDAL FIELD PROFILE FACTOR
+                self.g0 = float(line[1])
+            elif line[0] == 'n_g:':    # READ EXPONENT FOR TOROIDAL FIELD PROFILE g_hat FUNCTION
+                self.n_g = float(line[1])
+            return
+        
+        def BlockNumericalTreatement(self,line):
+            if line[0] == 'EXT_ITER:':        # READ MAXIMAL NUMBER OF ITERATION FOR EXTERNAL LOOP
+                self.EXT_ITER = int(line[1])
+            elif line[0] == 'EXT_TOL:':       # READ TOLERANCE FOR EXTERNAL LOOP
+                self.EXT_TOL = float(line[1])
+            elif line[0] == 'INT_ITER:':      # READ MAXIMAL NUMBER OF ITERATION FOR INTERNAL LOOP
+                self.INT_ITER = int(line[1])
+            elif line[0] == 'INT_TOL:':       # READ TOLERANCE FOR INTERNAL LOOP
+                self.INT_TOL = float(line[1])
+            elif line[0] == 'BETA:':          # READ NITSCHE'S METHOD PENALTY PARAMETER 
+                self.beta = float(line[1])
+            elif line[0] == 'RELAXATION:':    # READ AITKEN'S METHOD RELAXATION PARAMETER
+                self.alpha = float(line[1])
+            return
+        
+        ################################################
                 
         print("     -> READ EQUILI DATA FILE...",end='')
         # READ EQU FILE .equ.dat
@@ -245,101 +348,29 @@ class GradShafranovCutFEM:
                     l[e]=el[:-1]
                     
             if l:  # LINE NOT EMPTY
-                if l[0] == 'PLASMA_BOUNDARY:':        # READ IF FIXED/FREE BOUNDARY PROBLEM
+                if l[0] == 'PLASMA_BOUNDARY:':          # READ PLASMA BOUNDARY CONDITION (FIXED OR FREE)
                     self.PLASMA_BOUNDARY = l[1]
-                elif l[0] == 'SOL_CASE:':             # READ SOLUTION CASE
-                    self.CASE = l[1]
+                elif l[0] == 'PLASMA_GEOMETRY:':        # READ PLASMA REGION GEOMETRY (VACUUM VESSEL FIRST WALL OR F4E TRUE SHAPE)
+                    self.PLASMA_GEOMETRY = l[1]
+                elif l[0] == 'PLASMA_CURRENT:':         # READ MODEL FOR PLASMA CURRENT (LINEAR, NONLINEAR OR DEFINED USING PROFILES FOR PRESSURE AND TOROIDAL FIELD)
+                    self.PLASMA_CURRENT = l[1]
+                elif l[0] == 'VACUUM_VESSEL:':          # READ VACUUM VESSEL GEOMETRY (RECTANGLE -> COMPUTATIONAL DOMAIN BOUNDARY ; FIRST_WALL -> USE FIRST WALL GEOMETRY)
+                    self.VACUUM_VESSEL = l[1]
                 elif l[0] == 'TOTAL_CURRENT:':        # READ TOTAL PLASMA CURRENT
                     self.TOTAL_CURRENT = float(l[1])
                 
-                # READ PLASMA GEOMETRY PARAMETERS
-                elif l[0] == 'R_MAX:':    # READ PLASMA REGION X_CENTER 
-                    self.Rmax = float(l[1])
-                elif l[0] == 'R_MIN:':    # READ PLASMA REGION Y_CENTER 
-                    self.Rmin = float(l[1])
-                elif l[0] == 'EPSILON:':    # READ PLASMA REGION X_MINOR 
-                    self.epsilon = float(l[1])
-                elif l[0] == 'KAPPA:':    # READ PLASMA REGION X_MAYOR 
-                    self.kappa = float(l[1])
-                elif l[0] == 'DELTA:':    # READ PLASMA REGION X_CENTER 
-                    self.delta = float(l[1])
+                # READ TOKAMAK FIRST WALL GEOMETRY PARAMETERS
+                
                     
-                ### IF FREE-BOUNDARY PROBLEM:
-                elif self.PLASMA_BOUNDARY == 'FREE':
-                    # READ PLASMA SHAPE CONTROL POINTS
-                    if l[0] == 'X_SADDLE:':    # READ PLASMA REGION X_CENTER 
-                        self.X_SADDLE = float(l[1])
-                    elif l[0] == 'Y_SADDLE:':    # READ PLASMA REGION Y_CENTER 
-                        self.Y_SADDLE = float(l[1])
-                    elif l[0] == 'X_RIGHTMOST:':    # READ PLASMA REGION X_CENTER 
-                        self.X_RIGHTMOST = float(l[1])
-                    elif l[0] == 'Y_RIGHTMOST:':    # READ PLASMA REGION Y_CENTER 
-                        self.Y_RIGHTMOST = float(l[1])
-                    elif l[0] == 'X_LEFTMOST:':    # READ PLASMA REGION X_CENTER 
-                        self.X_LEFTMOST = float(l[1])
-                    elif l[0] == 'Y_LEFTMOST:':    # READ PLASMA REGION Y_CENTER 
-                        self.Y_LEFTMOST = float(l[1])
-                    elif l[0] == 'X_TOP:':    # READ PLASMA REGION X_CENTER 
-                        self.X_TOP = float(l[1])
-                    elif l[0] == 'Y_TOP:':    # READ PLASMA REGION Y_CENTER 
-                        self.Y_TOP = float(l[1])
+                
+                # READ PARAMETERS FOR PRESSURE AND TOROIDAL FIELD PROFILES
                     
-                    # READ PARAMETERS FOR PRESSURE AND TOROIDAL FIELD PROFILES
-                    elif l[0] == 'B0:':    # READ TOROIDAL FIELD MAGNITUDE ON MAGNETIC AXIS
-                        self.B0 = float(l[1])
-                    elif l[0] == 'q0:':    # READ TOKAMAK SAFETY FACTOR 
-                        self.q0 = float(l[1])
-                    elif l[0] == 'n_p:':    # READ EXPONENT FOR PRESSURE PROFILE p_hat FUNCTION 
-                        self.n_p = float(l[1])
-                    elif l[0] == 'g0:':    # READ TOROIDAL FIELD PROFILE FACTOR
-                        self.g0 = float(l[1])
-                    elif l[0] == 'n_g:':    # READ EXPONENT FOR TOROIDAL FIELD PROFILE g_hat FUNCTION
-                        self.n_g = float(l[1])
                         
-                    # READ COIL PARAMETERS
-                    elif l[0] == 'N_COILS:':    # READ PLASMA REGION X_CENTER 
-                        self.Ncoils = int(l[1])
-                        self.Xcoils = np.zeros([self.Ncoils,self.dim])
-                        self.Icoils = np.zeros([self.Ncoils])
-                        i = 0
-                    elif l[0] == 'Xposi:' and i<self.Ncoils:    # READ i-th COIL X POSITION
-                        self.Xcoils[i,0] = float(l[1])
-                    elif l[0] == 'Yposi:' and i<self.Ncoils:    # READ i-th COIL Y POSITION
-                        self.Xcoils[i,1] = float(l[1])
-                    elif l[0] == 'Inten:' and i<self.Ncoils:    # READ i-th COIL INTENSITY
-                        self.Icoils[i] = float(l[1])
-                        i += 1
-                        
-                    # READ SOLENOID PARAMETERS:
-                    elif l[0] == 'N_SOLENOIDS:':    # READ PLASMA REGION X_CENTER 
-                        self.Nsolenoids = int(l[1])
-                        self.Xsolenoids = np.zeros([self.Nsolenoids,self.dim+1])
-                        self.Nturnssole = np.zeros([self.Nsolenoids])
-                        self.Isolenoids = np.zeros([self.Nsolenoids])
-                        j = 0
-                    elif l[0] == 'Xposi:' and j<self.Nsolenoids:    # READ j-th SOLENOID X POSITION
-                        self.Xsolenoids[j,0] = float(l[1])
-                    elif l[0] == 'Ylow:' and j<self.Nsolenoids:    # READ j-th SOLENOID Y POSITION
-                        self.Xsolenoids[j,1] = float(l[1])
-                    elif l[0] == 'Yup:' and j<self.Nsolenoids:    # READ j-th SOLENOID Y POSITION
-                        self.Xsolenoids[j,2] = float(l[1])
-                    elif l[0] == 'Turns:' and j<self.Nsolenoids:    # READ j-th SOLENOID NUMBER OF TURNS
-                        self.Nturnssole[j] = float(l[1])
-                    elif l[0] == 'Inten:' and j<self.Nsolenoids:    # READ j-th SOLENOID INTENSITY
-                        self.Isolenoids[j] = float(l[1])
-                        j += 1
+                # READ COIL PARAMETERS
+                    
                     
                 # READ NUMERICAL TREATMENT PARAMETERS
-                if l[0] == 'EXT_ITER:':    # READ MAXIMAL NUMBER OF ITERATION FOR EXTERNAL LOOP
-                    self.EXT_ITER = int(l[1])
-                elif l[0] == 'EXT_TOL:':    # READ TOLERANCE FOR EXTERNAL LOOP
-                    self.EXT_TOL = float(l[1])
-                elif l[0] == 'INT_ITER:':    # READ MAXIMAL NUMBER OF ITERATION FOR INTERNAL LOOP
-                    self.INT_ITER = int(l[1])
-                elif l[0] == 'INT_TOL:':    # READ TOLERANCE FOR INTERNAL LOOP
-                    self.INT_TOL = float(l[1])
-                elif l[0] == 'RELAXATION:':   # READ AITKEN'S SCHEME RELAXATION CONSTANT
-                    self.alpha = float(l[1])
+                
             
         self.R0 = (self.Rmax+self.Rmin)/2
         if self.PLASMA_BOUNDARY == "FREE":
@@ -378,7 +409,7 @@ class GradShafranovCutFEM:
         if self.PLASMA_BOUNDARY == 'FIXED':
             # DIMENSIONALESS COORDINATES
             Xstar = X/self.R0
-            if self.CASE == 'LINEAR':
+            if self.CASE == 'LINEAR' or self.CASE == 'F4E':
                 if not self.coeffs: 
                     self.coeffs = self.ComputeLinearSolutionCoefficients()  # [D1, D2, D3]
                 PHIexact = (Xstar[0]**4)/8 + self.coeffs[0] + self.coeffs[1]*Xstar[0]**2 + self.coeffs[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2)
@@ -411,7 +442,7 @@ class GradShafranovCutFEM:
             R = R/self.R0
             Z = Z/self.R0
             # COMPUTE  PLASMA CURRENT
-            if self.CASE == 'LINEAR':
+            if self.CASE == 'LINEAR' or self.CASE == 'F4E':
                 # self.coeffs = [D1 D2 D3]  for linear solution
                 jphi = R/self.mu0
                 
@@ -756,7 +787,7 @@ class GradShafranovCutFEM:
     ############################### SOLUTION NORMALISATION ###########################################
     ##################################################################################################
     
-    def ComputeCriticalPHI(self):
+    def ComputeCriticalPHI(self,PHI):
         """ Function which computes the values of PHI at the:
                 - MAGNETIC AXIS ->> PHI_0 
                 - SEPARATRIX (LAST CLOSED MAGNETIC SURFACE) / SADDLE POINT ->> PHI_X 
@@ -784,7 +815,7 @@ class GradShafranovCutFEM:
         zfine = np.linspace(self.Ymin, self.Ymax, Mz)
         # INTERPOLATE PHI VALUES
         Rfine, Zfine = np.meshgrid(rfine,zfine)
-        PHIfine = griddata((self.X[:,0],self.X[:,1]), self.PHI.T[0], (Rfine, Zfine), method='cubic')
+        PHIfine = griddata((self.X[:,0],self.X[:,1]), PHI.T[0], (Rfine, Zfine), method='cubic')
         
         # 2. COMPUTE NORM(GRAD(PHI)) WITH FINER MESH VALUES USING FINITE DIFFERENCES
         dr = (rfine[-1]-rfine[0])/Mr
@@ -859,17 +890,17 @@ class GradShafranovCutFEM:
         if nature == "LOCAL EXTREMUM":
             # FOR THE MAGNETIC AXIS VALUE PHI_0, THE LOCAL EXTREMUM SHOULD LIE INSIDE THE PLASMA REGION
             elem = SearchElement(self.Elements,Xcrit,self.PlasmaElems)
-            self.PHI_0 = self.Elements[elem].ElementalInterpolation(Xcrit,self.PHI[self.Elements[elem].Te])
+            self.PHI_0 = self.Elements[elem].ElementalInterpolation(Xcrit,PHI[self.Elements[elem].Te])
             self.PHI_X = 0
         else:
             elem = SearchElement(self.Elements,Xcrit,self.VacuumElems)
-            self.PHI_X = self.Elements[elem].ElementalInterpolation(Xcrit,self.PHI[self.Elements[elem].Te])
+            self.PHI_X = self.Elements[elem].ElementalInterpolation(Xcrit,PHI[self.Elements[elem].Te])
             self.PHI_0 = 0
             
         #if self.PLASMA_BOUNDARY == 'FIXED':
         #    self.PHI_X = 0.1
             
-        return 
+        return Xcrit
     
     
     def NormalisePHI(self):
@@ -947,9 +978,10 @@ class GradShafranovCutFEM:
             ####### COMPUTE INTERFACE TERMS
             # COMPUTE INTERFACE CONDITIONS PHI_D
             ELEMENT.PHI_Dg = np.zeros([ELEMENT.Ng1D])
-            for ig in range(ELEMENT.Ng1D):
-                ELEMENT.PHI_Dg[ig] = self.SolutionCASE(ELEMENT.Xgint[ig,:])
-                
+            if self.PLASMA_BOUNDARY == 'FIXED' and (self.CASE == 'LINEAR' or self.CASE == 'NONLINEAR'):
+                for ig in range(ELEMENT.Ng1D):
+                    ELEMENT.PHI_Dg[ig] = self.SolutionCASE(ELEMENT.Xgint[ig,:])  
+            
             # COMPUTE ELEMENTAL MATRICES
             ELEMENT.IntegrateElementalInterfaceTerms(ELEMENT.PHI_Dg,self.beta,self.LHS,self.RHS)
             
@@ -1057,14 +1089,14 @@ class GradShafranovCutFEM:
             
         self.LevelSet = np.zeros([self.Nn])
             
-        if self.PLASMA_BOUNDARY == 'FIXED':
+        if self.PLASMA_BOUNDARY == 'FIXED' and (self.CASE == 'LINEAR' or self.CASE == 'NONLINEAR'):
             # ADIMENSIONALISE MESH
             Xstar = self.X/self.R0
             coeffs = self.ComputeLinearSolutionCoefficients()
             for i in range(self.Nn):
                 self.LevelSet[i] = Xstar[i,0]**4/8 + coeffs[0] + coeffs[1]*Xstar[i,0]**2 + coeffs[2]*(Xstar[i,0]**4-4*Xstar[i,0]**2*Xstar[i,1]**2)
                 
-        elif self.PLASMA_BOUNDARY == 'FREE':
+        elif self.PLASMA_BOUNDARY == 'FREE' or self.CASE == "F4E":
             self.LevelSet = self.F4E_LevelSet()
             
         return 
@@ -1260,7 +1292,7 @@ class GradShafranovCutFEM:
                 self.UpdateElementalPHI('PHI_NORM')   # UPDATE PHI_NORM VALUES IN CORRESPONDING ELEMENTS
                 self.AssembleGlobalSystem()  
                 self.SolveSystem()                    # 1. SOLVE CutFEM SYSTEM  ->> PHI
-                self.ComputeCriticalPHI()             # 2. COMPUTE CRITICAL VALUES   PHI_0 AND PHI_X
+                foo = self.ComputeCriticalPHI(self.PHI)     # 2. COMPUTE CRITICAL VALUES   PHI_0 AND PHI_X
                 self.NormalisePHI()                   # 3. NORMALISE PHI RESPECT TO CRITICAL VALUES  ->> PHI_NORM 
                 self.CheckConvergence('PHI_NORM')     # 4. CHECK CONVERGENCE OF PHI_NORM FIELD
                 self.UpdatePHI('PHI_NORM')            # 5. UPDATE PHI_NORM VALUES 
@@ -1270,7 +1302,7 @@ class GradShafranovCutFEM:
             self.UpdatePHI('PHI_B')                   # UPDATE PHI_NORM AND PHI_B VALUES
             #****************************************
         print('SOLUTION CONVERGED')
-        self.PlotSolution(self.PHI_CONV,colorbar=True)
+        self.PlotSolution(self.PHI_CONV)
         return
     
     
@@ -1278,17 +1310,15 @@ class GradShafranovCutFEM:
     ############################### RENDERING AND REPRESENTATION #####################################
     ##################################################################################################
     
-    def PlotSolution(self,phi,colorbar=False):
+    def PlotSolution(self,phi):
         if len(np.shape(phi)) == 2:
             phi = phi[:,0]
-        plt.figure(figsize=(7,10))
-        plt.ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
-        plt.xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
-        plt.tricontourf(self.X[:,0],self.X[:,1], phi, levels=30)
-        if colorbar == False:
-            plt.tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors='k')
-        else:
-            plt.colorbar()
+        fig, axs = plt.subplots(1, 1, figsize=(7,8))
+        axs.set_xlim(self.Xmin,self.Xmax)
+        axs.set_ylim(self.Ymin,self.Ymax)
+        a = axs.tricontourf(self.X[:,0],self.X[:,1], phi, levels=30)
+        axs.tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors = 'red')
+        plt.colorbar(a, ax=axs)
         plt.show()
         return
     
