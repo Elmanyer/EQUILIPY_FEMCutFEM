@@ -31,60 +31,61 @@ $$ PLASMA REGION GEOMETRY: (ITER)
 
 $$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
    N_COILS:              6
+   N_COILS:              6
    Xposi:   3.9431
    Yposi:   7.5741    
-   Inten:   200.0
+   Inten:   40000.0
 
    Xposi:   8.2851
    Yposi:   6.5398   
-   Inten:   200.0
+   Inten:   3000.0
 
    Xposi:   11.9919
    Yposi:   3.2752  
-   Inten:   400.0
+   Inten:   3000.0
 
    Xposi:   11.9630
    Yposi:   -2.2336  
-   Inten:   400.0
+   Inten:   3000.0
 
    Xposi:   8.3908
    Yposi:   -6.7269  
-   Inten:   200.0
+   Inten:   47000.0
 
    Xposi:   4.3340
    Yposi:   -7.4665  
-   Inten:   200.0
+   Inten:   40000.0
 
    N_SOLENOIDS:          5
    Xposi:   1.696
    Ylow:    -5.415
    Yup:     -3.6067
    Turns:   553
-   Inten:   100
+   Inten:   15000
 
    Xposi:   1.696
    Ylow:    -3.6067
    Yup:     -1.7983
    Turns:   553
-   Inten:   100
+   Inten:   15000
 
    Xposi:   1.696
    Ylow:    -1.7983
    Yup:     1.8183
    Turns:   1106
-   Inten:   100
+   Inten:   15000
 
    Xposi:   1.696
    Ylow:    1.8183
    Yup:     3.6267
    Turns:   553
-   Inten:   100
+   Inten:   15000
 
    Xposi:   1.696
    Ylow:    3.6267
    Yup:     5.435
    Turns:   553
-   Inten:   100
+   Inten:   15000
 
   PROPERTIES: 1
   MASS_DENSITY_1: 1.0
@@ -93,9 +94,9 @@ $$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
 END_PHYSICAL_PROBLEM                                                                  
 $------------------------------------------------------------                         
 NUMERICAL_TREATMENT                           
-  EXT_ITER:     10        $ EXTERNAL LOOP (PHI_B) MAXIMUM ITERATIONS
+  EXT_ITER:     1        $ EXTERNAL LOOP (PHI_B) MAXIMUM ITERATIONS
   EXT_TOL:      1.0e-3    $ EXTERNAL LOOP (PHI_B) CONVERGENCE TOLERANCE
-  INT_ITER:     20        $ INTERNAL LOOP (PHI_NORM) MAXIMUM ITERATIONS
+  INT_ITER:     3        $ INTERNAL LOOP (PHI_NORM) MAXIMUM ITERATIONS
   INT_TOL:      1.0e-3    $ INTERNAL LOOP (PHI_NORM) CONVERGENCE TOLERANCE
   BETA:         1.0e10    $ NITSCHE'S METHOD PENALTY PARAMETER
   RELAXATION:   1.0       $ AIKITEN'S METHOD RELAXATION PARAMETER 
