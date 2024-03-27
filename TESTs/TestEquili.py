@@ -44,7 +44,7 @@ axs[0].set_xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
 axs[0].tricontourf(self.X[:,0],self.X[:,1], phi, levels=30)
 axs[0].tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors='k')
 
-for elem in self.InterElems:
+for elem in self.PlasmaBoundElems:
     ELEMENT = self.Elements[elem]
 
     # PLOT PHYSICAL INTERFACE LINEAR APPROXIMATION
