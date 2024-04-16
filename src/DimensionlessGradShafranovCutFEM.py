@@ -395,21 +395,6 @@ class GradShafranovCutFEM:
                 
         if self.PLASMA_BOUNDARY == self.VACUUM_VESSEL:
             raise Exception("PLASMA REGION GEOMETRY AND VACUUM VESSEL FIRST WALL GEOMETRY MUST BE DIFFERENT")
-            
-        # COMPUTE TOKAMAK MEAN RADIUS
-        self.R0 = (self.Rmax+self.Rmin)/2
-        # TOKAMAK'S 1rst WALL GEOMETRY COEFFICIENTS, USED ALSO FOR LINEAR PLASMA MODEL ANALYTICAL SOLUTION (INITIAL GUESS)
-        self.coeffs1W = self.ComputeLinearSolutionCoefficients()
-        
-        if self.PLASMA_CURRENT == "PROFILES":
-            # COMPUTE PRESSURE PROFILE FACTOR
-            self.P0=self.B0*(self.kappa**2+1)/(self.mu0*self.R0**2*self.q0*self.kappa)
-            
-        # PREPARE MATRICES FOR STORING ALL RESULTS
-        self.PHI_NORM_ALL = np.zeros([self.Nn, self.INT_ITER*self.EXT_ITER])
-        self.PHI_crit_ALL = np.zeros([2, 3, self.INT_ITER*self.EXT_ITER])   # dim0 = 2 -> LOCAL EXTREMUM AND SADDLE POINT;  dim1 = 3 -> [PHI_crit_val, x_crit, y_crit]
-        self.PlasmaBoundLevSet_ALL = np.zeros([self.Nn, self.INT_ITER*self.EXT_ITER])
-        self.ElementalGroups_ALL = np.zeros([self.Ne, self.INT_ITER*self.EXT_ITER])
              
         print('Done!')  
         return
@@ -438,17 +423,13 @@ class GradShafranovCutFEM:
         coeffs = np.linalg.solve(A,b)
         return coeffs.T[0].tolist() 
     
-    def AnalyticalSolutionLINEAR(self,X):
+    def AnalyticalSolutionLINEAR(self,Xstar):
         """ Function which computes the ANALYTICAL SOLUTION FOR THE LINEAR PLASMA MODEL at point with coordinates X. """
-        # DIMENSIONALESS COORDINATES
-        Xstar = X/self.R0
         PHIexact = (Xstar[0]**4)/8 + self.coeffs1W[0] + self.coeffs1W[1]*Xstar[0]**2 + self.coeffs1W[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2)
         return PHIexact
             
-    def AnalyticalSolutionNONLINEAR(self,X):
+    def AnalyticalSolutionNONLINEAR(self,Xstar):
         """ Function which computes the ANALYTICAL SOLUTION FOR THE MANUFACTURED NONLINEAR PLASMA MODEL at point with coordinates X. """
-        # DIMENSIONALESS COORDINATES
-        Xstar = X/self.R0 
         coeffs = [1.15*np.pi, 1.15, -0.5]  # [Kr, Kz, R0] 
         PHIexact = np.sin(coeffs[0]*(Xstar[0]+coeffs[2]))*np.cos(coeffs[1]*Xstar[1])  
         return PHIexact
@@ -461,26 +442,20 @@ class GradShafranovCutFEM:
     def Jphi(self,R,Z,PHI):
         
         if self.PLASMA_CURRENT == 'LINEAR':
-            # NORMALIE COORDINATES
-            Rstar = R/self.R0
-            # COMPUTE  PLASMA CURRENT
-            # self.coeffs = [D1 D2 D3]  for linear solution
-            jphi = Rstar/self.mu0
-                
+            jphi = R/self.Jc
+                 
         elif self.PLASMA_CURRENT == 'NONLINEAR': 
-            # NORMALIE COORDINATES
-            Rstar = R/self.R0
-            Zstar = Z/self.R0
-            # COMPUTE  PLASMA CURRENT
+            # PLASMA CURRENT PROFILE COEFFICIENTS
             Kr = 1.15*np.pi
             Kz = 1.15
             r0 = -0.5
-            jphi = -((Kr**2+Kz**2)*PHI+(Kr/Rstar)*np.cos(Kr*(Rstar+r0))*np.cos(Kz*Zstar)+Rstar*((np.sin(Kr*
-                    (Rstar+r0))*np.cos(Kz*Zstar))**2-PHI**2+np.exp(-np.sin(Kr*(Rstar+r0))*np.cos(Kz*Zstar))-np.exp(-PHI)))/(self.mu0*Rstar)
+            # COMPUTE PLASMA CURRENT
+            jphi = -((Kr**2+Kz**2)*PHI+(Kr/R)*np.cos(Kr*(R+r0))*np.cos(Kz*Z)+R*((np.sin(Kr*
+                    (R+r0))*np.cos(Kz*Z))**2-PHI**2+np.exp(-np.sin(Kr*(R+r0))*np.cos(Kz*Z))-np.exp(-PHI)))/(R*self.Jc)
         
         elif self.PLASMA_CURRENT == "PROFILES":
             ## OPTION WITH GAMMA APPLIED TO funG AND WITHOUT denom
-            jphi = -R * self.dPdphi(PHI) - 0.5*self.dG2dphi(PHI)/ (R*self.mu0)
+            jphi = -R*self.dPdphi(PHI) - 0.5*self.dG2dphi(PHI)/R
             
         return jphi
     
@@ -488,26 +463,20 @@ class GradShafranovCutFEM:
         """ Function which computes the plasma current source term on the right hand side of the Grad-Shafranov equation. """
         
         if self.PLASMA_CURRENT == 'LINEAR':
-            # NORMALIE COORDINATES
-            Rstar = R/self.R0
-            # COMPUTE  PLASMA CURRENT
-            # self.coeffs = [D1 D2 D3]  for linear solution
-            jphi = Rstar/self.mu0
-                
+            jphi = R/self.Jc
+                 
         elif self.PLASMA_CURRENT == 'NONLINEAR': 
-            # NORMALIE COORDINATES
-            Rstar = R/self.R0
-            Zstar = Z/self.R0
-            # COMPUTE  PLASMA CURRENT
+            # PLASMA CURRENT PROFILE COEFFICIENTS
             Kr = 1.15*np.pi
             Kz = 1.15
             r0 = -0.5
-            jphi = -((Kr**2+Kz**2)*PHI+(Kr/Rstar)*np.cos(Kr*(Rstar+r0))*np.cos(Kz*Zstar)+Rstar*((np.sin(Kr*
-                    (Rstar+r0))*np.cos(Kz*Zstar))**2-PHI**2+np.exp(-np.sin(Kr*(Rstar+r0))*np.cos(Kz*Zstar))-np.exp(-PHI)))/(self.mu0*Rstar)
+            # COMPUTE PLASMA CURRENT
+            jphi = -((Kr**2+Kz**2)*PHI+(Kr/R)*np.cos(Kr*(R+r0))*np.cos(Kz*Z)+R*((np.sin(Kr*
+                    (R+r0))*np.cos(Kz*Z))**2-PHI**2+np.exp(-np.sin(Kr*(R+r0))*np.cos(Kz*Z))-np.exp(-PHI)))/(R*self.Jc)
         
         elif self.PLASMA_CURRENT == "PROFILES":
             ## OPTION WITH GAMMA APPLIED TO funG AND WITHOUT denom
-            jphi = -R * self.dPdphi(PHI) - 0.5*self.dG2dphi_NORM(PHI)/ (R*self.mu0)
+            jphi = -R * self.dPdphi(PHI) - 0.5*self.dG2dphi_NORM(PHI)/R
             
         return jphi
     
@@ -519,15 +488,15 @@ class GradShafranovCutFEM:
             denom = 1
         else:
             denom = self.PHI_X - self.PHI_0
-        dp = -self.P0*self.n_p*(phi**(self.n_p-1))/denom"""
-        dp = self.P0*self.n_p*(phi**(self.n_p-1))
+        dp = -self.P0star*self.n_p*(phi**(self.n_p-1))/denom""" 
+        dp = self.P0star*self.n_p*(phi**(self.n_p-1))
         return dp
     
     ######## TOROIDAL FUNCTION MODELING
-    
+        
     def dG2dphi(self,phi):
         # FUNCTION MODELING TOROIDAL FIELD FUNCTION DERIVATIVE IN PLASMA REGION
-        dg = (self.G0**2)*self.n_g*(phi**(self.n_g-1))
+        dg = (self.G0star**2)*self.n_g*(phi**(self.n_g-1))
         return dg
     
     def dG2dphi_NORM(self,phi):
@@ -536,10 +505,11 @@ class GradShafranovCutFEM:
             denom = 1
         else:
             denom = self.PHI_X - self.PHI_0
-        dg = -(self.G0**2)*self.gamma*self.n_g*(phi**(self.n_g-1))/denom"""
-        dg = (self.G0**2)*0.05*self.n_g*(phi**(self.n_g-1))
+        dg = -(self.G0star**2)*self.gamma*self.n_g*(phi**(self.n_g-1))/denom"""
+        dg = (self.G0star**2)*self.gamma*self.n_g*(phi**(self.n_g-1))
         return dg
-    
+            
+
     ##################################################################################################
     ###################################### LEVEL-SET DESCRIPTION #####################################
     ##################################################################################################
@@ -625,16 +595,16 @@ class GradShafranovCutFEM:
             Ared = np.delete(A,5,0)    # delete last row
             return Ared, bred
         
-        # BUILD CONTROL POINTS
-        P0 = np.array([self.X_SADDLE, self.Y_SADDLE])
-        P1 = np.array([self.X_RIGHTMOST, self.Y_RIGHTMOST])
-        P2 = np.array([self.X_LEFTMOST, self.Y_LEFTMOST])
-        P3 = np.array([self.X_TOP, self.Y_TOP])
+        # BUILD ADIMENDIONAL CONTROL POINTS
+        P0 = np.array([self.X_SADDLE, self.Y_SADDLE])/self.R0
+        P1 = np.array([self.X_RIGHTMOST, self.Y_RIGHTMOST])/self.R0
+        P2 = np.array([self.X_LEFTMOST, self.Y_LEFTMOST])/self.R0
+        P3 = np.array([self.X_TOP, self.Y_TOP])/self.R0
         
         # 1. RESCALE POINT COORDINATES SO THAT THE SADDLE POINT IS LOCATED AT ORIGIN (0,0)
-        P1star = P1-P0
-        P2star = P2-P0
-        P3star = P3-P0
+        P1bar = P1-P0
+        P2bar = P2-P0
+        P3bar = P3-P0
 
         # 2. COMPUTE HAMILTONIAN COEFFICIENTS
         # Build system matrices
@@ -642,23 +612,23 @@ class GradShafranovCutFEM:
         b = np.zeros([6,1])
 
         # Constraints on point P1 = (a1,b1)
-        Arow11, brow11 = Point_on_curve(P1star)
-        Arow12, brow12 = VerticalTangent(P1star)
+        Arow11, brow11 = Point_on_curve(P1bar)
+        Arow12, brow12 = VerticalTangent(P1bar)
         A[0,:] = Arow11
         b[0] = brow11
         A[1,:] = Arow12
         b[1] = brow12
 
         # Constraints on point P2 = (a2,b2)
-        Arow21, brow21 = Point_on_curve(P2star)
-        Arow22, brow22 = VerticalTangent(P2star)
+        Arow21, brow21 = Point_on_curve(P2bar)
+        Arow22, brow22 = VerticalTangent(P2bar)
         A[2,:] = Arow21
         b[2] = brow21
         A[3,:] = Arow22
         b[3] = brow22
         
         # Constraints on point P3 = (a3,b3)
-        Arow31, brow31 = Point_on_curve(P3star)
+        Arow31, brow31 = Point_on_curve(P3bar)
         A[4,:] = Arow31
         b[4] = brow31
 
@@ -674,15 +644,15 @@ class GradShafranovCutFEM:
         
         # 2. OBTAIN LEVEL-SET VALUES ON MESH NODES
         # HAMILTONIAN  ->>  Z(x,y) = H(x,y) = x**2 + A11xy + A02y**2 + A30x**3 + A21x**2y + A12xy**2 + A03y**3
-        Xstar = self.X[:,0]-P0[0]
-        Ystar = self.X[:,1]-P0[1]
+        Xbar = self.Xstar[:,0]-P0[0]
+        Ybar = self.Xstar[:,1]-P0[1]
         LS = np.zeros([self.Nn])
         for i in range(self.Nn):
-            LS[i] = Xstar[i]**2+coeffs[0]*Xstar[i]*Ystar[i]+coeffs[1]*Ystar[i]**2+coeffs[2]*Xstar[i]**3+coeffs[3]*Xstar[i]**2*Ystar[i]+coeffs[4]*Xstar[i]*Ystar[i]**2+coeffs[5]*Ystar[i]**3
+            LS[i] = Xbar[i]**2+coeffs[0]*Xbar[i]*Ybar[i]+coeffs[1]*Ybar[i]**2+coeffs[2]*Xbar[i]**3+coeffs[3]*Xbar[i]**2*Ybar[i]+coeffs[4]*Xbar[i]*Ybar[i]**2+coeffs[5]*Ybar[i]**3
 
         # MODIFY HAMILTONIAN VALUES SO THAT OUTSIDE THE PLASMA REGION THE LEVEL-SET IS POSITIVE  
         for i in range(self.Nn):
-            if self.X[i,0] < P2[0] or self.X[i,1] < P0[1]:
+            if self.Xstar[i,0] < P2[0] or self.Xstar[i,1] < P0[1]:
                 LS[i] = np.abs(LS[i])
         return LS
     
@@ -753,12 +723,12 @@ class GradShafranovCutFEM:
         
                         # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
                         for icoil in range(self.Ncoils): 
-                            PHI_B[k] += self.mu0 * GreenFunction(Xnode,self.Xcoils[icoil,:]) * self.Icoils[icoil]
+                            PHI_B[k] += GreenFunction(Xnode,self.Xcoilsstar[icoil,:]) * self.Icoilsstar[icoil]
                 
                         # CONTRIBUTION FROM EXTERNAL SOLENOIDS CURRENT  ->>  INTEGRATE OVER SOLENOID LENGTH 
                         for isole in range(self.Nsolenoids):
-                            Xsole = np.array([[self.Xsolenoids[isole,0], self.Xsolenoids[isole,1]],[self.Xsolenoids[isole,0], self.Xsolenoids[isole,2]]])   # COORDINATES OF SOLENOID EDGES
-                            Jsole = self.Isolenoids[isole]/np.linalg.norm(Xsole[0,:]-Xsole[1,:])   # SOLENOID CURRENT LINEAR DENSITY
+                            Xsole = np.array([[self.Xsolenoidsstar[isole,0], self.Xsolenoidsstar[isole,1]],[self.Xsolenoidsstar[isole,0], self.Xsolenoidsstar[isole,2]]])   # COORDINATES OF SOLENOID EDGES
+                            Jsole = self.Isolenoidsstar[isole]/np.linalg.norm(Xsole[0,:]-Xsole[1,:])   # SOLENOID CURRENT LINEAR DENSITY
                             # LOOP OVER GAUSS NODES
                             for ig in range(self.Ng1D):
                                 # MAPP 1D REFERENCE INTEGRATION GAUSS NODES TO PHYSICAL SPACE ON SOLENOID
@@ -767,7 +737,7 @@ class GradShafranovCutFEM:
                                 detJ1D = Jacobian1D(Xsole[0,:],Xsole[1,:],self.dNdxi1D[ig,:])
                                 detJ1D = detJ1D*2*np.pi*np.mean(Xsole[:,0])
                                 for l in range(self.nsole):
-                                    PHI_B[k] += self.mu0 * GreenFunction(Xnode,Xgsole) * Jsole * self.N1D[ig,l] * detJ1D * self.Wg1D[ig]
+                                    PHI_B[k] += GreenFunction(Xnode,Xgsole) * Jsole * self.N1D[ig,l] * detJ1D * self.Wg1D[ig]
                     
                         # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
                         #   1. INTEGRATE IN PLASMA ELEMENTS
@@ -779,7 +749,7 @@ class GradShafranovCutFEM:
                             # LOOP OVER GAUSS NODES
                             for ig in range(ELEMENT.Ng2D):
                                 for l in range(ELEMENT.n):
-                                    PHI_B[k] += self.mu0 * GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
+                                    PHI_B[k] += GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
                                                                             PHIg[ig])*ELEMENT.N[ig,l]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]*self.gamma
                             
                         #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
@@ -794,8 +764,8 @@ class GradShafranovCutFEM:
                                     # LOOP OVER GAUSS NODES
                                     for ig in range(SUBELEM.Ng2D):
                                         for l in range(SUBELEM.n):
-                                            PHI_B[k] += self.mu0 * GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
-                                                                    PHIg[ig])*SUBELEM.N[ig,l]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*self.gamma               
+                                            PHI_B[k] += GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
+                                                                    PHIg[ig])*SUBELEM.N[ig,l]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*self.gamma             
                         k += 1
         return PHI_B
     
@@ -964,7 +934,7 @@ class GradShafranovCutFEM:
         zfine = np.linspace(self.Ymin, self.Ymax, Mz)
         # INTERPOLATE PHI VALUES
         Rfine, Zfine = np.meshgrid(rfine,zfine)
-        PHIfine = griddata((self.X[:,0],self.X[:,1]), PHI.T[0], (Rfine, Zfine), method='cubic')
+        PHIfine = griddata((self.Xstar[:,0],self.Xstar[:,1]), PHI.T[0]*self.PHIc, (Rfine, Zfine), method='cubic')
         
         # 2. DEFINE GRAD(PHI) WITH FINER MESH VALUES USING FINITE DIFFERENCES
         dr = (rfine[-1]-rfine[0])/Mr
@@ -1041,8 +1011,8 @@ class GradShafranovCutFEM:
         # FIND SOLUTION OF  GRAD(PHI) = 0   NEAR MAGNETIC AXIS AND SADDLE POINT 
         if self.it == 1:
             self.Xcrit = np.zeros([2,3])
-            X0_extr = np.array([6,0])
-            X0_saddle = np.array([5,-4])
+            X0_extr = np.array([6,0])/self.R0
+            X0_saddle = np.array([5,-4])/self.R0
         else:
             X0_extr = self.Xcrit[0,:-1]
             X0_saddle = self.Xcrit[1,:-1]
@@ -1138,7 +1108,7 @@ class GradShafranovCutFEM:
         
         Tcurrent = self.ComputeTotalPlasmaCurrent()
         # COMPUTE TOTAL PLASMA CURRENT CORRECTION FACTOR            
-        self.gamma = self.TOTAL_CURRENT/Tcurrent
+        self.gamma = self.TOTAL_CURRENT/(Tcurrent*self.Jc)
         
         """Int1 = 0
         Int2 = 0
@@ -1177,8 +1147,8 @@ class GradShafranovCutFEM:
         else:
             denom = self.PHI_X - self.PHI_0
             
-        #self.gamma = -2*self.mu0*(self.TOTAL_CURRENT+self.P0*self.n_p*Int1)/(self.n_g*Int2*self.G0**2)
-        self.gamma = -2*self.mu0*(self.TOTAL_CURRENT*denom+self.P0*self.n_p*Int1)/(self.n_g*Int2*self.G0**2)"""
+        self.gamma = -2*(1+self.P0star*self.n_p*Int1)/(self.n_g*Int2*self.G0star**2)
+        #self.gamma = -2*self.mu0*(denom+self.P0*self.n_p*Int1)/(self.n_g*Int2*self.G0**2)"""
         
         return
     
@@ -1288,15 +1258,19 @@ class GradShafranovCutFEM:
     def InitialGuess(self):
         """ This function computes the problem's initial guess, which is taken as the LINEAR CASE SOLUTION WITH SOME RANDOM NOISE. """
         PHI0 = np.zeros([self.Nn])
+        #if self.PLASMA_BOUNDARY == "FIXED":
         if self.PLASMA_CURRENT == 'LINEAR':      
             for i in range(self.Nn):
-                PHI0[i] = self.AnalyticalSolutionLINEAR(self.X[i,:])*2*random()
+                PHI0[i] = self.AnalyticalSolutionLINEAR(self.Xstar[i,:])*2*random()
         elif self.PLASMA_CURRENT == 'NONLINEAR':
             for i in range(self.Nn):
-                PHI0[i] = self.AnalyticalSolutionNONLINEAR(self.X[i,:])*2*random()
+                PHI0[i] = self.AnalyticalSolutionNONLINEAR(self.Xstar[i,:])*2*random()
         else:
             for i in range(self.Nn):
-                PHI0[i] = self.AnalyticalSolutionLINEAR(self.X[i,:])*0.5
+                PHI0[i] = self.AnalyticalSolutionLINEAR(self.Xstar[i,:])*0.5
+        """else:
+            for i in range(self.Nn):
+                PHI0[i] = self.AnalyticalSolutionLINEAR(self.Xstar[i,:])*0.5"""
         return PHI0
     
     def InitialiseLevelSets(self):
@@ -1311,34 +1285,30 @@ class GradShafranovCutFEM:
         self.PlasmaBoundLevSet = np.zeros([self.Nn])
         if self.PLASMA_GEOMETRY == 'FIRST_WALL':  # IN THIS CASE, THE PLASMA REGION SHAPE IS TAKEN AS THE SHAPE OF THE TOKAMAK'S FIRST WALL
             for i in range(self.Nn):
-                self.PlasmaBoundLevSet[i] = self.AnalyticalSolutionLINEAR(self.X[i,:])
+                self.PlasmaBoundLevSet[i] = self.AnalyticalSolutionLINEAR(self.Xstar[i,:])
         elif self.PLASMA_GEOMETRY == "F4E":    # IN THIS CASE, THE PLASMA REGION SHAPE IS DESCRIBED USING THE F4E SHAPE CONTROL POINTS
             self.PlasmaBoundLevSet = self.F4E_PlasmaBoundLevSet()
             
-        self.VacVessWallLevSet = (-1)*np.ones([self.Nn])
         if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+            self.VacVessWallLevSet = (-1)*np.ones([self.Nn])
             for node_index in self.BoundaryNodes:
                 self.VacVessWallLevSet[node_index] = 0
         elif self.VACUUM_VESSEL == "FIRST_WALL":
+            self.VacVessWallLevSet = np.zeros([self.Nn])
             for i in range(self.Nn):
-                self.VacVessWallLevSet[i] = self.AnalyticalSolutionLINEAR(self.X[i,:])
+                self.VacVessWallLevSet[i] = self.AnalyticalSolutionLINEAR(self.Xstar[i,:])
             
         return 
     
     def InitialiseElements(self):
         """ Function initialising attribute ELEMENTS which is a list of all elements in the mesh. """
-        self.Elements = [Element(e,self.ElType,self.ElOrder,self.X[self.T[e,:],:],self.T[e,:],self.PlasmaBoundLevSet[self.T[e,:]],
+        self.Elements = [Element(e,self.ElType,self.ElOrder,self.Xstar[self.T[e,:],:],self.T[e,:],self.PlasmaBoundLevSet[self.T[e,:]],
                                  self.VacVessWallLevSet[self.T[e,:]]) for e in range(self.Ne)]
         return
     
     def InitialisePHI(self):  
         """ INITIALISE PHI VECTORS WHERE THE DIFFERENT SOLUTIONS WILL BE STORED ITERATIVELY DURING THE SIMULATION AND COMPUTE INITIAL GUESS."""
-        ####### INITIALISE PHI_NORM UNKNOWN VECTORS
-        # INITIALISE PHI VECTORS
-        self.PHI = np.zeros([self.Nn])            # SOLUTION FROM SOLVING CutFEM SYSTEM OF EQUATIONS (INTERNAL LOOP)       
-        self.PHI_NORM = np.zeros([self.Nn,2])     # NORMALISED PHI SOLUTION FIELD (INTERNAL LOOP) AT ITERATIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
-        self.PHI_CONV = np.zeros([self.Nn])       # CONVERGED SOLUTION FIELD
-        
+        ####### PHI_NORM 
         # COMPUTE INITIAL GUESS AND STORE IT IN INTERNAL SOLUTION FOR N=0
         print('         -> COMPUTE INITIAL GUESS FOR PHI_NORM...', end="")
         self.PHI_NORM[:,0] = self.InitialGuess()  
@@ -1378,9 +1348,78 @@ class GradShafranovCutFEM:
         
         return
     
+    def AllocateProblemMemory(self):
+        # PREPARE MATRICES FOR STORING ALL RESULTS
+        self.PHI_NORM_ALL = np.zeros([self.Nn, self.INT_ITER*self.EXT_ITER])
+        self.PHI_crit_ALL = np.zeros([2, 3, self.INT_ITER*self.EXT_ITER])   # dim0 = 2 -> LOCAL EXTREMUM AND SADDLE POINT;  dim1 = 3 -> [PHI_crit_val, x_crit, y_crit]
+        self.PlasmaBoundLevSet_ALL = np.zeros([self.Nn, self.INT_ITER*self.EXT_ITER])
+        self.ElementalGroups_ALL = np.zeros([self.Ne, self.INT_ITER*self.EXT_ITER])
+        
+        # INITIALISE PHI VECTORS
+        self.PHI = np.zeros([self.Nn])            # SOLUTION FROM SOLVING CutFEM SYSTEM OF EQUATIONS (INTERNAL LOOP)       
+        self.PHI_NORM = np.zeros([self.Nn,2])     # NORMALISED PHI SOLUTION FIELD (INTERNAL LOOP) AT ITERATIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
+        self.PHI_CONV = np.zeros([self.Nn])       # CONVERGED SOLUTION FIELD
+        return
+    
+    def AdimensionaliseProblem(self):
+        print("         => CHARACTERISTIC VALUES:")
+        # COMPUTE PROBLEM CHARACTERISTIC VALUES
+        self.R0 = (self.Rmax+self.Rmin)/2           # CHARACTERISTIC LENGHT
+        self.Jc = np.abs(self.TOTAL_CURRENT)/self.R0**2     # CHARACTERISTIC CURRENT INTENSITY
+        self.PHIc = self.mu0*self.Jc*self.R0**3     # CHARACTERISTIC POLOIDAL MAGNETIC FLUX
+        print("             R0 = ", self.R0)
+        print("             Jc = ", self.Jc)
+        print("             PHIc = ", self.PHIc)
+        if self.PLASMA_CURRENT == "PROFILES":
+            # COMPUTE PRESSURE VALUE ON MAGNETIC AXIS
+            self.P0=self.B0*(self.kappa**2+1)/(self.mu0*self.R0**2*self.q0*self.kappa)
+            # COMPUTE PLASMA CURRENT PROFILE MODELS CHARACTERISTIC VALUES
+            self.Pc = self.mu0*(self.Jc*self.R0)**2             # CHARACTERISTIC PRESSURE
+            self.Gc = np.sqrt(self.mu0*self.Pc)*self.R0         # CHARACTERISTIC POLOIDAL FUNCTION
+            print("             Pc = ", self.Pc)
+            print("             Gc = ", self.Gc)
+            
+        # ADIMENSIONALISE NODAL COORDINATES
+        self.Xstar = self.X / self.R0
+        
+        # ADIMENSIONALISE COMPUTATIONAL DOMAIN'S LIMITS
+        self.Xmax /= self.R0
+        self.Xmin /= self.R0
+        self.Ymax /= self.R0
+        self.Ymin /= self.R0
+        
+        # TOKAMAK'S 1rst WALL GEOMETRY COEFFICIENTS, USED ALSO FOR LINEAR PLASMA MODEL ANALYTICAL SOLUTION (INITIAL GUESS)
+        self.coeffs1W = self.ComputeLinearSolutionCoefficients()
+        
+        # ADIMENSIONALISE PLASMA CURRENT MODEL PROFILES (PLASMA PRESSURE AND POLOIDAL CURRENT FUNCTION)
+        if self.PLASMA_CURRENT == "PROFILES":
+            self.P0star = self.P0/self.Pc 
+            self.G0star = self.G0/self.Gc 
+        
+        # ADIMENSIONALISE COILS AND SOLENOIDS PARAMETERS
+        if self.PLASMA_BOUNDARY == "FREE":
+            #### COILS
+            self.Xcoilsstar = self.Xcoils/self.R0
+            self.Icoilsstar = self.Icoils/self.Jc 
+            #### SOLENOIDS
+            self.Xsolenoidsstar = self.Xsolenoids/self.R0
+            self.Isolenoidsstar = self.Isolenoids/self.Jc
+        return
+    
     
     def Initialization(self):
         """ Routine which initialises all the necessary elements in the problem """
+        
+        # ALLOCATE MEMORY
+        print("     -> ALLOCATE MEMORY...", end="")
+        self.AllocateProblemMemory()
+        print('Done!')
+        
+        # COMPUTE CHARACTERISCTIC VALUES AND ADIMENSIONALISE PROBLEM VARIABLES AND PARAMETERS 
+        print("     -> ADIMENSIONALISE PROBLEM...")
+        self.AdimensionaliseProblem()
+        print('Done!')
+        
         # INITIALISE LEVEL-SET FUNCTION
         print("     -> INITIALISE LEVEL-SET...", end="")
         self.InitialiseLevelSets()
@@ -1507,14 +1546,14 @@ class GradShafranovCutFEM:
                 
             Xcenter_lowest_elem = np.array([np.sum(self.Elements[lowest_elem].Xe[:,0])/3,np.sum(self.Elements[lowest_elem].Xe[:,1])/3])
                 
-            if np.linalg.norm(Xcenter_lowest_elem-self.Xcrit[1,:-1]) < 0.5:
+            if np.linalg.norm(Xcenter_lowest_elem-self.Xcrit[1,:-1]) < 0.05:
                 return
             
             else:
                 ###### UPDATE PLASMA REGION LEVEL-SET FUNCTION VALUES ACCORDING TO SOLUTION OBTAINED
                 # RECALL THAT PLASMA REGION IS DEFINED BY NEGATIVE VALUES OF LEVEL-SET
                 for i in range(self.Nn):  
-                    if self.X[i,0] < 3 or self.X[i,1] < self.Xcrit[1,1]:
+                    if self.Xstar[i,0] < 0.6 or self.Xstar[i,1] < self.Xcrit[1,1]:
                         self.PlasmaBoundLevSet[i] = np.abs(self.PHI_NORM[i,1])
                     else:
                         self.PlasmaBoundLevSet[i] = -self.PHI_NORM[i,1]
@@ -1561,8 +1600,7 @@ class GradShafranovCutFEM:
                 # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
                 PHIg = ELEMENT.N @ ELEMENT.PHIe
                 for ig in range(self.Elements[elem].Ng2D):
-                    #SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])
-                    SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])*self.gamma 
+                    SourceTermg[ig] = ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])*self.gamma
             # COMPUTE ELEMENTAL MATRICES
             ELEMENT.IntegrateElementalDomainTerms(SourceTermg,self.LHS,self.RHS)
         print("Done!")
@@ -1583,8 +1621,7 @@ class GradShafranovCutFEM:
                     # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
                     PHIg = SUBELEM.N @ ELEMENT.PHIe
                     for ig in range(SUBELEM.Ng2D):
-                        #SourceTermg[ig] = self.mu0*SUBELEM.Xg2D[ig,0]*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])
-                        SourceTermg[ig] = self.mu0*SUBELEM.Xg2D[ig,0]*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])*self.gamma
+                        SourceTermg[ig] = SUBELEM.Xg2D[ig,0]*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])*self.gamma
                 # COMPUTE ELEMENTAL MATRICES
                 SUBELEM.IntegrateElementalDomainTerms(SourceTermg,self.LHS,self.RHS)
         print("Done!")
@@ -1697,7 +1734,6 @@ class GradShafranovCutFEM:
             self.CheckConvergence('PHI_B')            # CHECK CONVERGENCE OF VACUUM VESSEL FIEST WALL PHI VALUES  (PHI_B)
             self.UpdatePHI('PHI_B')                   # UPDATE PHI_NORM AND PHI_B VALUES
             self.UpdateElementalPHI_g("FIRST WALL")   # UPDATE ELEMENTAL CONSTRAINT VALUES PHI_g FOR VACUUM VESSEL FIRST WALL INTERFACE
-            print('Done!') 
             #****************************************
         print('SOLUTION CONVERGED')
         #self.PlotSolution(self.PHI_CONV)
@@ -1714,9 +1750,9 @@ class GradShafranovCutFEM:
         fig, axs = plt.subplots(1, 1, figsize=(5,5))
         axs.set_xlim(self.Xmin,self.Xmax)
         axs.set_ylim(self.Ymin,self.Ymax)
-        a = axs.tricontourf(self.X[:,0],self.X[:,1], phi, levels=30)
-        axs.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
-        axs.tricontour(self.X[:,0],self.X[:,1], phi, levels=[0], colors = 'black')
+        a = axs.tricontourf(self.Xstar[:,0],self.Xstar[:,1], phi, levels=30)
+        axs.tricontour(self.Xstar[:,0],self.Xstar[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        axs.tricontour(self.Xstar[:,0],self.Xstar[:,1], phi, levels=[0], colors = 'black')
         plt.colorbar(a, ax=axs)
         plt.show()
         return
@@ -1732,18 +1768,20 @@ class GradShafranovCutFEM:
         Jphi = np.zeros([self.Nn])
         Jphi_norm = np.zeros([self.Nn])
         for i in range(self.Nn):
-            Jphi[i] = self.Jphi(self.X[i,0],self.X[i,1],self.PHI_NORM[i,0])
+            Jphi[i] = self.Jphi(self.Xstar[i,0],self.Xstar[i,1],self.PHI_NORM[i,0])
             Jphi_norm[i] = Jphi[i]*self.gamma
         
         # LEFT PLOT: PLASMA CURRENT Jphi 
-        a0 = axs[0].tricontourf(self.X[:,0],self.X[:,1], Jphi, levels=50)
-        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        a0 = axs[0].tricontourf(self.Xstar[:,0],self.Xstar[:,1], Jphi, levels=50)
+        axs[0].tricontour(self.Xstar[:,0],self.Xstar[:,1], Jphi, levels=[0], colors = 'black')
+        axs[0].tricontour(self.Xstar[:,0],self.Xstar[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         axs[0].set_title("PLASMA CURRENT Jphi")
         plt.colorbar(a0, ax=axs[0])
         
         # RIGHT PLOT: NORMALIZED PLASMA CURRENT Jphi_NORM
-        a1 = axs[1].tricontourf(self.X[:,0],self.X[:,1], Jphi_norm, levels=50)
-        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        a1 = axs[1].tricontourf(self.Xstar[:,0],self.Xstar[:,1], Jphi_norm, levels=50)
+        axs[1].tricontour(self.Xstar[:,0],self.Xstar[:,1], Jphi_norm, levels=[0], colors = 'black')
+        axs[1].tricontour(self.Xstar[:,0],self.Xstar[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         axs[1].yaxis.set_visible(False)
         axs[1].set_title("NORMALIZED PLASMA CURRENT Jphi")
         plt.colorbar(a1, ax=axs[1])
@@ -1760,16 +1798,16 @@ class GradShafranovCutFEM:
             axs[i].set_ylim(self.Ymin, self.Ymax)
         
         # CENTRAL PLOT: PHI at iteration N+1 WITHOUT NORMALISATION (SOLUTION OBTAINED BY SOLVING CUTFEM SYSTEM)
-        a0 = axs[0].tricontourf(self.X[:,0],self.X[:,1], self.PHI[:,0], levels=50)
-        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PHI[:,0], levels=[0], colors = 'black')
-        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        a0 = axs[0].tricontourf(self.Xstar[:,0],self.Xstar[:,1], self.PHI[:,0], levels=50)
+        axs[0].tricontour(self.Xstar[:,0],self.Xstar[:,1], self.PHI[:,0], levels=[0], colors = 'black')
+        axs[0].tricontour(self.Xstar[:,0],self.Xstar[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         axs[0].set_title('POLOIDAL MAGNETIC FLUX PHI')
         plt.colorbar(a0, ax=axs[0])
         
         # RIGHT PLOT: PHI at iteration N+1 WITH NORMALISATION
-        a1 = axs[1].tricontourf(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=50)
-        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=[0], colors = 'black')
-        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        a1 = axs[1].tricontourf(self.Xstar[:,0],self.Xstar[:,1], self.PHI_NORM[:,1], levels=50)
+        axs[1].tricontour(self.Xstar[:,0],self.Xstar[:,1], self.PHI_NORM[:,1], levels=[0], colors = 'black')
+        axs[1].tricontour(self.Xstar[:,0],self.Xstar[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         axs[1].set_title('NORMALIZED POLOIDAL MAGNETIC FLUX PHI_NORM')
         axs[1].yaxis.set_visible(False)
         plt.colorbar(a1, ax=axs[1])
@@ -1853,8 +1891,8 @@ class GradShafranovCutFEM:
     
     def PlotClassifiedElements_2(self):
         plt.figure(figsize=(5,6))
-        plt.ylim(self.Ymin-0.25,self.Ymax+0.25)
-        plt.xlim(self.Xmin-0.25,self.Xmax+0.25)
+        plt.ylim(self.Ymin-0.1,self.Ymax+0.1)
+        plt.xlim(self.Xmin-0.1,self.Xmax+0.1)
         
         # PLOT PLASMA REGION ELEMENTS
         for elem in self.PlasmaElems:
@@ -1898,9 +1936,9 @@ class GradShafranovCutFEM:
             plt.fill(Xe[:,0], Xe[:,1], color = 'cyan')
              
         # PLOT PLASMA/VACUUM INTERFACE 
-        plt.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors='green',linewidths=3)
+        plt.tricontour(self.Xstar[:,0],self.Xstar[:,1], self.PlasmaBoundLevSet, levels=[0], colors='green',linewidths=3)
         # PLOT VACUUM VESSEL FIRST WALL
-        plt.tricontour(self.X[:,0],self.X[:,1], self.VacVessWallLevSet, levels=[0], colors='orange',linewidths=3)
+        plt.tricontour(self.Xstar[:,0],self.Xstar[:,1], self.VacVessWallLevSet, levels=[0], colors='orange',linewidths=3)
         
         plt.show()
         return
