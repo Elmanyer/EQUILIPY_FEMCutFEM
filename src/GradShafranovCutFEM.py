@@ -283,22 +283,22 @@ class GradShafranovCutFEM:
         
         def BlockF4E(self,line):
             # READ PLASMA SHAPE CONTROL POINTS
-            if line[0] == 'X_SADDLE:':    # READ PLASMA REGION X_CENTER 
-                self.X_SADDLE = float(line[1])
-            elif line[0] == 'Y_SADDLE:':    # READ PLASMA REGION Y_CENTER 
-                self.Y_SADDLE = float(line[1])
-            elif line[0] == 'X_RIGHTMOST:':    # READ PLASMA REGION X_CENTER 
-                self.X_RIGHTMOST = float(line[1])
-            elif line[0] == 'Y_RIGHTMOST:':    # READ PLASMA REGION Y_CENTER 
-                self.Y_RIGHTMOST = float(line[1])
-            elif line[0] == 'X_LEFTMOST:':    # READ PLASMA REGION X_CENTER 
-                self.X_LEFTMOST = float(line[1])
-            elif line[0] == 'Y_LEFTMOST:':    # READ PLASMA REGION Y_CENTER 
-                self.Y_LEFTMOST = float(line[1])
-            elif line[0] == 'X_TOP:':    # READ PLASMA REGION X_CENTER 
-                self.X_TOP = float(line[1])
-            elif line[0] == 'Y_TOP:':    # READ PLASMA REGION Y_CENTER 
-                self.Y_TOP = float(line[1])
+            if line[0] == 'R_SADDLE:':    # READ PLASMA REGION X_CENTER 
+                self.R_SADDLE = float(line[1])
+            elif line[0] == 'Z_SADDLE:':    # READ PLASMA REGION Y_CENTER 
+                self.Z_SADDLE = float(line[1])
+            elif line[0] == 'R_RIGHTMOST:':    # READ PLASMA REGION X_CENTER 
+                self.R_RIGHTMOST = float(line[1])
+            elif line[0] == 'Z_RIGHTMOST:':    # READ PLASMA REGION Y_CENTER 
+                self.Z_RIGHTMOST = float(line[1])
+            elif line[0] == 'R_LEFTMOST:':    # READ PLASMA REGION X_CENTER 
+                self.R_LEFTMOST = float(line[1])
+            elif line[0] == 'Z_LEFTMOST:':    # READ PLASMA REGION Y_CENTER 
+                self.Z_LEFTMOST = float(line[1])
+            elif line[0] == 'R_TOP:':    # READ PLASMA REGION X_CENTER 
+                self.R_TOP = float(line[1])
+            elif line[0] == 'Z_TOP:':    # READ PLASMA REGION Y_CENTER 
+                self.Z_TOP = float(line[1])
             return
         
         def BlockExternalMagnets(self,line,i,j):
@@ -306,9 +306,9 @@ class GradShafranovCutFEM:
                 self.Ncoils = int(line[1])
                 self.Xcoils = np.zeros([self.Ncoils,self.dim])
                 self.Icoils = np.zeros([self.Ncoils])
-            elif line[0] == 'Xposi:' and i<self.Ncoils:    # READ i-th COIL X POSITION
+            elif line[0] == 'Rposi:' and i<self.Ncoils:    # READ i-th COIL X POSITION
                 self.Xcoils[i,0] = float(line[1])
-            elif line[0] == 'Yposi:' and i<self.Ncoils:    # READ i-th COIL Y POSITION
+            elif line[0] == 'Zposi:' and i<self.Ncoils:    # READ i-th COIL Y POSITION
                 self.Xcoils[i,1] = float(line[1])
             elif line[0] == 'Inten:' and i<self.Ncoils:    # READ i-th COIL INTENSITY
                 self.Icoils[i] = float(line[1])
@@ -319,11 +319,11 @@ class GradShafranovCutFEM:
                 self.Xsolenoids = np.zeros([self.Nsolenoids,self.dim+1])
                 self.Nturnssole = np.zeros([self.Nsolenoids])
                 self.Isolenoids = np.zeros([self.Nsolenoids])
-            elif line[0] == 'Xposi:' and j<self.Nsolenoids:    # READ j-th SOLENOID X POSITION
+            elif line[0] == 'Rposi:' and j<self.Nsolenoids:    # READ j-th SOLENOID X POSITION
                 self.Xsolenoids[j,0] = float(line[1])
-            elif line[0] == 'Ylow:' and j<self.Nsolenoids:     # READ j-th SOLENOID Y POSITION
+            elif line[0] == 'Zlow:' and j<self.Nsolenoids:     # READ j-th SOLENOID Y POSITION
                 self.Xsolenoids[j,1] = float(line[1])
-            elif line[0] == 'Yup:' and j<self.Nsolenoids:      # READ j-th SOLENOID Y POSITION
+            elif line[0] == 'Zup:' and j<self.Nsolenoids:      # READ j-th SOLENOID Y POSITION
                 self.Xsolenoids[j,2] = float(line[1])
             elif line[0] == 'Inten:' and j<self.Nsolenoids:    # READ j-th SOLENOID INTENSITY
                 self.Isolenoids[j] = float(line[1])
@@ -382,7 +382,7 @@ class GradShafranovCutFEM:
                 # READ TOKAMAK FIRST WALL GEOMETRY PARAMETERS
                 BlockFirstWall(self,l)
                 # READ CONTROL POINTS COORDINATES FOR F4E PLASMA SHAPE
-                if self.PLASMA_GEOMETRY == 'F4E' or self.VACUUM_VESSEL == 'F4E':
+                if self.PLASMA_GEOMETRY == 'F4E':
                     BlockF4E(self,l)
                 # READ PARAMETERS FOR PRESSURE AND TOROIDAL FIELD PROFILES
                 if self.PLASMA_CURRENT == 'PROFILES':
@@ -626,10 +626,10 @@ class GradShafranovCutFEM:
             return Ared, bred
         
         # BUILD CONTROL POINTS
-        P0 = np.array([self.X_SADDLE, self.Y_SADDLE])
-        P1 = np.array([self.X_RIGHTMOST, self.Y_RIGHTMOST])
-        P2 = np.array([self.X_LEFTMOST, self.Y_LEFTMOST])
-        P3 = np.array([self.X_TOP, self.Y_TOP])
+        P0 = np.array([self.R_SADDLE, self.Z_SADDLE])
+        P1 = np.array([self.R_RIGHTMOST, self.Z_RIGHTMOST])
+        P2 = np.array([self.R_LEFTMOST, self.Z_LEFTMOST])
+        P3 = np.array([self.R_TOP, self.Z_TOP])
         
         # 1. RESCALE POINT COORDINATES SO THAT THE SADDLE POINT IS LOCATED AT ORIGIN (0,0)
         P1star = P1-P0

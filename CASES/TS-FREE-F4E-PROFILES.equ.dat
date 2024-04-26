@@ -9,7 +9,7 @@ PHYSICAL_PROBLEM
    NUMMATERIALS:          1        $ 1>CHAMBER  2> CHAMBER+METAL 3<CHAMBER+METAL+VACUUM
    TOTAL_CURRENT:         -15000000.0 
 $   CTE_PLASMA:            100.0
-   GEOMETRY:              AXYSIMETRICO   $ FULL3D
+   GEOMETRY:              AXISYMETRIC   $ FULL3D
 
 $$ VACUUM VESSEL GEOMETRY: (ITER)                       
    R_MAX:       8.0       $ PLASMA REGION MAJOR RADIUS  
@@ -20,14 +20,14 @@ $$ VACUUM VESSEL GEOMETRY: (ITER)
 
 $$ PLASMA REGION GEOMETRY: (ITER)
    CONTROL_POINTS:        4
-   X_SADDLE:              5.5 
-   Y_SADDLE:              -2.7 
-   X_RIGHTMOST:           7.2
-   Y_RIGHTMOST:           0.2
-   X_LEFTMOST:            4.8
-   Y_LEFTMOST:            0.6
-   X_TOP:                 5.9
-   Y_TOP:                 2.4
+   R_SADDLE:              5.5 
+   Z_SADDLE:              -2.7 
+   R_RIGHTMOST:           7.2
+   Z_RIGHTMOST:           0.2
+   R_LEFTMOST:            4.8
+   Z_LEFTMOST:            0.6
+   R_TOP:                 5.9
+   Z_TOP:                 2.4
 
 $$ PARAMETERS FOR PRESSURE AND TOROIDAL FIEL PROFILES
    B0:      9.0      $ TOROIDAL FIELD MAGNITUDE ON MAGNETIC AXIS
@@ -38,54 +38,54 @@ $$ PARAMETERS FOR PRESSURE AND TOROIDAL FIEL PROFILES
 
 $$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
    N_COILS:              6
-   Xposi:   3.9431
-   Yposi:   7.5741    
+   Rposi:   3.9431
+   Zposi:   7.5741    
    Inten:   5730000.0
 
-   Xposi:   8.2851
-   Yposi:   6.5398   
+   Rposi:   8.2851
+   Zposi:   6.5398   
    Inten:   -2880000.0
 
-   Xposi:   11.9919
-   Yposi:   3.2752  
+   Rposi:   11.9919
+   Zposi:   3.2752  
    Inten:   -5810000.0
 
-   Xposi:   11.9630
-   Yposi:   -2.2336  
+   Rposi:   11.9630
+   Zposi:   -2.2336  
    Inten:   -4780000.0
 
-   Xposi:   8.3908
-   Yposi:   -6.7269  
+   Rposi:   8.3908
+   Zposi:   -6.7269  
    Inten:   -7810000.0
 
-   Xposi:   4.3340
-   Yposi:   -7.4665  
+   Rposi:   4.3340
+   Zposi:   -7.4665  
    Inten:   16940000.0
 
    N_SOLENOIDS:          5
-   Xposi:   1.696
-   Ylow:    -5.415
-   Yup:     -3.6067
+   Rposi:   1.696
+   Zlow:    -5.415
+   Zup:     -3.6067
    Inten:   5300000
 
-   Xposi:   1.696
-   Ylow:    -3.6067
-   Yup:     -1.7983
+   Rposi:   1.696
+   Zlow:    -3.6067
+   Zup:     -1.7983
    Inten:   -10300000
 
-   Xposi:   1.696
-   Ylow:    -1.7983
-   Yup:     1.8183
+   Rposi:   1.696
+   Zlow:    -1.7983
+   Zup:     1.8183
    Inten:   -41600000
 
-   Xposi:   1.696
-   Ylow:    1.8183
-   Yup:     3.6267
+   Rposi:   1.696
+   Zlow:    1.8183
+   Zup:     3.6267
    Inten:   -4050000
 
-   Xposi:   1.696
-   Ylow:    3.6267
-   Yup:     5.435
+   Rposi:   1.696
+   Zlow:    3.6267
+   Zup:     5.435
    Inten:   -4820000
 
   PROPERTIES: 1

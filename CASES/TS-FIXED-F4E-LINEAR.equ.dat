@@ -9,7 +9,7 @@ PHYSICAL_PROBLEM
    NUMMATERIALS:          1        $ 1>CHAMBER  2> CHAMBER+METAL 3<CHAMBER+METAL+VACUUM
    TOTAL_CURRENT:         -15000000.0 
 $   CTE_PLASMA:            100.0
-   GEOMETRY:              AXYSIMETRICO   $ FULL3D 
+   GEOMETRY:              AXISYMETRIC   $ FULL3D 
    
 $$ VACUUM VESSEL GEOMETRY: (ITER)                       
    R_MAX:       8.0       $ PLASMA REGION MAJOR RADIUS  
@@ -20,14 +20,14 @@ $$ VACUUM VESSEL GEOMETRY: (ITER)
 
 $$ PLASMA REGION GEOMETRY: (ITER)
    CONTROL_POINTS:        4
-   X_SADDLE:              5.5 
-   Y_SADDLE:              -2.7 
-   X_RIGHTMOST:           7.2
-   Y_RIGHTMOST:           0.2
-   X_LEFTMOST:            4.8
-   Y_LEFTMOST:            0.6
-   X_TOP:                 5.9
-   Y_TOP:                 2.4
+   R_SADDLE:              5.5 
+   Z_SADDLE:              -2.7 
+   R_RIGHTMOST:           7.2
+   Z_RIGHTMOST:           0.2
+   R_LEFTMOST:            4.8
+   Z_LEFTMOST:            0.6
+   R_TOP:                 5.9
+   Z_TOP:                 2.4
 
   PROPERTIES: 1
   MASS_DENSITY_1: 1.0
