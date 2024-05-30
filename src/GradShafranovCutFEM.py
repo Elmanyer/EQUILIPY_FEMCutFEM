@@ -749,7 +749,7 @@ class GradShafranovCutFEM:
                 for edge in range(self.Elements[element].Neint):
                     for point in range(self.Elements[element].Ng1D):
                         # ISOLATE NODAL COORDINATES
-                        Xnode = self.Elements[element].Xeint[edge,point,:]
+                        Xnode = self.Elements[element].Xgint[edge,point,:]
         
                         # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
                         for icoil in range(self.Ncoils): 
@@ -1502,10 +1502,10 @@ class GradShafranovCutFEM:
             # LOOK FOR LOWEST ELEMENT IN MESH CONTAINING THE INTERFACE PLASMA/VACUUM
             lowest_elem = 0
             for elem in self.PlasmaBoundElems:
-                if lowest_elem == 0 or np.sum(self.Elements[elem].Xe[:,1])/3 < np.sum(self.Elements[lowest_elem].Xe[:,1])/3:
+                if lowest_elem == 0 or np.sum(self.Elements[elem].Xe[:,1])/self.Elements[elem].n < np.sum(self.Elements[lowest_elem].Xe[:,1])/self.Elements[elem].n:
                     lowest_elem = elem
                 
-            Xcenter_lowest_elem = np.array([np.sum(self.Elements[lowest_elem].Xe[:,0])/3,np.sum(self.Elements[lowest_elem].Xe[:,1])/3])
+            Xcenter_lowest_elem = np.array([np.sum(self.Elements[lowest_elem].Xe[:,0])/self.Elements[elem].n,np.sum(self.Elements[lowest_elem].Xe[:,1])/self.Elements[elem].n])
                 
             if np.linalg.norm(Xcenter_lowest_elem-self.Xcrit[1,:-1]) < 0.5:
                 return
@@ -1558,7 +1558,7 @@ class GradShafranovCutFEM:
             # COMPUTE SOURCE TERM (PLASMA CURRENT)  mu0*R*Jphi  IN PLASMA REGION NODES
             SourceTermg = np.zeros([ELEMENT.Ng2D])
             if ELEMENT.Dom < 0:
-                # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
+                # MAP PHI VALUES FROM ELEMENT NODES TO GAUSS NODES
                 PHIg = ELEMENT.N @ ELEMENT.PHIe
                 for ig in range(self.Elements[elem].Ng2D):
                     #SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])
