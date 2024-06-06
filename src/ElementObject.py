@@ -4,6 +4,7 @@ QUADRATURES, NODAL VALUES...) FOR A SINGLE ELEMENT IN THE MESH. """
 from src.GaussQuadrature import *
 from src.ShapeFunctions import *
 from scipy import optimize
+from src.SegmentObject import *
 
 class Element:
     
@@ -12,7 +13,12 @@ class Element:
         self.index = index                                              # GLOBAL INDEX ON COMPUTATIONAL MESH
         self.ElType = ElType                                            # ELEMENT TYPE -> 0: SEGMENT ;  1: TRIANGLE  ; 2: QUADRILATERAL
         self.ElOrder = ElOrder                                          # ELEMENT ORDER -> 1: LINEAR ELEMENT  ;  2: QUADRATIC
+        self.numedges = ElementalNumberOfEdges(ElType)                  # ELEMENTAL NUMBER OF EDGES
         self.n, self.nedge = ElementalNumberOfNodes(ElType, ElOrder)    # NUMBER OF NODES PER ELEMENT, PER ELEMENTAL EDGE
+        if self.ElType == 1:
+            self.numvertices = 3
+        elif self.ElType == 2:
+            self.numvertices = 4
         self.Xe = Xe                                                    # ELEMENTAL NODAL MATRIX (PHYSICAL COORDINATES)
         self.dim = len(Xe[0,:])                                         # SPATIAL DIMENSION
         self.Te = Te                                                    # ELEMENTAL CONNECTIVITIES
@@ -21,12 +27,7 @@ class Element:
         self.PHIe = np.zeros([self.n])                                  # ELEMENTAL NODAL PHI VALUES
         self.Dom = None                                                 # DOMAIN WHERE THE ELEMENT LIES (-1: "PLASMA"; 0: "PLASMA INTERFACE"; +1: "VACUUM" ; +2: FIRST WALL ; +3: "EXTERIOR")
         
-        # INTEGRATION QUADRATURES ENTITIES (1D AND 2D)
-        self.Ng1D = None            # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 1D QUADRATURE
-        self.XIg1D = None           # STANDARD 1D GAUSS INTEGRATION NODES 
-        self.Wg1D = None            # STANDARD 1D GAUSS INTEGRATION WEIGTHS 
-        self.N1D = None             # REFERENCE 1D SHAPE FUNCTIONS EVALUATED AT STANDARD 1D GAUSS INTEGRATION NODES 
-        self.dNdxi1D = None         # REFERENCE 1D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT STANDARD 1D GAUSS INTEGRATION NODES
+        # INTEGRATION QUADRATURES ENTITIES
         self.Ng2D = None            # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 2D GAUSS QUADRATURE
         self.XIg2D = None           # STANDARD 2D GAUSS INTEGRATION NODES 
         self.Wg2D = None            # STANDARD 2D GAUSS INTEGRATION WEIGTHS
@@ -38,25 +39,15 @@ class Element:
         self.detJg = None           # MATRIX DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT, EVALUATED AT GAUSS INTEGRATION NODES 
         
         ### ATTRIBUTES FOR INTERFACE ELEMENTS
-        self.interface = None       # INTERFACE GLOBAL INDEX
-        self.PHI_g = None           # PHI VALUE CONSTRAINT ON INTERFACE EDGES INTEGRATION POINTS
         self.Neint = None           # NUMBER OF ELEMENTAL EDGES ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
-        self.Teint = None           # BOUNDARY EDGES CONNECTIVITY MATRIX (LOCAL INDEXES) 
-        self.Xeint = None           # PHYSICAL INTERFACE NODAL COORDINATES 
-        self.permu = None           # PERMUTATIONS IN THE CONECTIVITY SO THAT THE COMMON NODE IS FIRST
+        self.InterEdges = None      # ARRAY CONTAINING THE ELEMENTAL EDGES/CUTS CORRESPONDING TO INTERFACES
         self.Nsub = None            # NUMBER OF SUBELEMENTS GENERATED IN TESSELLATION
-        self.Xemod = None           # MODIFIED ELEMENTAL NODAL MATRIX (PHYSICAL COORDINATES)
-        self.Temod = None           # MODIFIED CONNECTIVITY MATRIX FOR TESSELLED INTERFACE PHYSICAL ELEMENT
-        # MODIFIED QUADRATURE FOR INTEGRATION ALONG INTERFACE 
-        self.XIgint = None       # MODIFIED GAUSS INTEGRATION NODES COMPUTED FROM 1D STANDARD QUADRATURE 
-        self.Nint = None         # REFERENCE 2D SHAPE FUNCTIONS EVALUATED AT MODIFIED 1D GAUSS INTEGRATION NODES 
-        self.Xgint = None        # PHYSICAL 2D GAUSS INTEGRATION NODES MAPPED FROM 1D REFERENCE ELEMENT
-        self.dNdxiint = None     # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT MODIFIED 1D GAUSS INTEGRATION NODES 
-        self.dNdetaint = None    # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO ETA EVALUATED AT MODIFIED 1D GAUSS INTEGRATION NODES
-        self.detJgint = None     # MATRIX DETERMINANTS OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT INTERFACE EVALUATED AT GAUSS INTEGRATION NODES
-        
-        self.NormalVec = None       # INTERFACE/BOUNDARY EDGE NORMAL VECTOR POINTING OUTWARDS
-        
+        self.XeTESS = None          # MODIFIED ELEMENTAL NODAL MATRIX (PHYSICAL COORDINATES)
+        self.TeTESS = None          # MODIFIED CONNECTIVITY MATRIX FOR TESSELLED INTERFACE PHYSICAL ELEMENT
+        self.DomTESS = None         # DOMAIN WHERE THE TESSELLED ELEMENT SUBELEMENTS LIE (-1: "PLASMA"; +1: "VACUUM" ; +3: "EXTERIOR")
+        self.XIeTESS = None         # MODIFIED REFERENCE ELEMENT NODAL MATRIX (PHYSICAL COORDINATES)
+        self.TeTESSREF = None       # MODIFIED CONNECTIVITY MATRIX FOR TESSELLED INTERFACE REFERENCE ELEMENT
+        self.XIeint = None
         return
     
     def Mapping(self,Xi):
@@ -100,7 +91,8 @@ class Element:
         """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
         F = 0
         for i in range(self.n):
-            N = ShapeFunctionsPhysical(X, self.Xe, self.ElType, self.ElOrder, i+1)
+            Xi = self.InverseMapping(X)
+            N, foo, foo = ShapeFunctionsReference(Xi, self.ElType, self.ElOrder, i+1)
             F += N*Fe[i]
         return F
     
@@ -110,102 +102,44 @@ class Element:
     ##################################################################################################
     
     
-    def InterfaceLinearApproximation(self):
+    def InterfaceLinearApproximation(self,interface_index):
         """ FUNCTION COMPÙTING THE INTERSECTION POINTS BETWEEN THE ELEMENT EDGES AND THE INTERFACE CUTTING THE ELEMENT (PLASMA/VACUUM INTERFACE OR VACUUM VESSEL FIRST WALL).  
-            FOR THE MOMENT, DESIGNED EXCLUSIVELY FOR TRIANGULAR ELEMENTS
+            THE CUTTING SEGMENT IS STORED AS A SEGMENT OBJECT (DEFINED IN FILE SegmentObject.py) IN ELEMENT ATTRIBUTE InterEdges
             
             COMPUTED ATTRIBUTES:
-                - Neint: NUMBER OF INTERFACES IN ELEMENT
-                - Xeint: PHYSICAL INTERFACE NODAL COORDINATES 
-                - Xemod: MODIFIED ELEMENTAL NODAL MATRIX (PHYSICAL COORDINATES)
-                - permu: PERMUTATIONS IN THE CONECTIVITY SO THAT THE COMMON NODE IS FIRST
+                * FOR ELEMENT
+                    - Neint: NUMBER OF INTERFACES IN ELEMENT
+                * FOR INTERFACE SEGMENT
+                    - Xeint: PHYSICAL INTERFACE SEGMENT VERTICES COORDINATES 
+                    - inter_edges: LOCAL INDICES OF VERTICES WHERE SEGMENT ENDS ARE LOCATED
             """
         
-        # READ NODAL COORDINATES 
-        Xe = self.Xe
         # READ LEVEL-SET NODAL VALUES
         if self.Dom == 0:  # PLASMA/VACUUM INTERFACE ELEMENT
             LSe = self.PlasmaLSe  
         if self.Dom == 2:  # VACUUM VESSEL FIRST WALL ELEMENT
             LSe = self.VacVessLSe
-            
-        # LOOK FOR THE NODE WHICH HAS DIFFERENT SIGN...
-        pospos = np.where(LSe > 0)[0]
-        posneg = np.where(LSe < 0)[0]
-        # ... PIVOT COORDINATES MATRIX ACCORDINGLY
-        if len(pospos) > len(posneg):  # 2 nodal level-set values are positive (outside plasma region)
-            pos = np.concatenate((posneg,pospos),axis=0)
-            Xe = Xe[pos]
-            LSe = LSe[pos]
-        else: # 2 nodal level-set values are negative (inside plasma region)
-            pos = np.concatenate((pospos,posneg),axis=0)
-            Xe = Xe[pos]
-            LSe = LSe[pos]
-
-        # NOW, THE FIRST ROW IN Xe AND FIRST ELEMENT IN LSe CORRESPONDS TO THE NODE ALONE IN ITS RESPECTIVE REGION (INSIDE OR OUTSIDE PLASMA REGION)
         
         # OBTAIN INTERSECTION COORDINATES FOR EACH EDGE:
         self.Neint = 1
-        self.Xeint = np.zeros([self.Neint,2,self.dim])
-        for i, edge in enumerate([1,2]):
-            
-            if np.abs(Xe[edge,0]-Xe[0,0]) > 1e-8:  # EDGE IS NOT VERTICAL
-                # WE DEFINE NOW THE DIFFERENT FUNCTION WE NEED IN ORDER TO BUILD THE TRANSCENDENTAL EQUATION CHARACTERISING THE INTERSECTION BETWEEN
-                # THE ELEMENT'S EDGE AND THE LEVEL-SET 0-CONTOUR
-                def z(r,Xe,edge):
-                    # FUNCTION DESCRIBING THE RESTRICCION ASSOCIATED TO THE ELEMENT EDGE
-                    z = ((Xe[edge,1]-Xe[0,1])*r+Xe[0,1]*Xe[edge,0]-Xe[edge,1]*Xe[0,0])/(Xe[edge,0]-Xe[0,0])
-                    return z  
-
-                def fun(r,Xe,LSe,edge):
-                    def N0(r,z,Xe):
-                        # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE WHICH IS "ALONE" IN RESPECTIVE REGION (OUTSIDE OR INSIDE PLASMA REGION)
-                        j = 1
-                        k = 2
-                        N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
-                        return N
-                    def Nedge(r,z,Xe,edge):
-                        # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE ALONG THE EDGE FOR WHICH FIND THE INTERSECTION WITH LEVEL-SET 0-CONTOUR
-                        j = (edge+1)%3
-                        k = (edge+2)%3
-                        N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
-                        return N
-                    
-                    # TRANSCENDENTAL EQUATION TO SOLVE
-                    f = N0(r,z(r,Xe,edge),Xe)*LSe[0] + Nedge(r,z(r,Xe,edge),Xe,edge)*LSe[edge]
-                    return f
-
-                # SOLVE TRANSCENDENTAL EQUATION AND COMPUTE INTERSECTION COORDINATES
-                sol = optimize.root(fun, Xe[0,0], args=(Xe,LSe,edge))
-                self.Xeint[0,i,:] = [sol.x, z(sol.x,Xe,edge)]
-                
-            else:  # IF THE ELEMENT'S EDGE IS VERTICAL
-                r = Xe[0,0] 
-                
-                def fun(z,r,Xe,LSe,edge):
-                    def N0(r,z,Xe):
-                        # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE WHICH IS "ALONE" IN RESPECTIVE REGION (OUTSIDE OR INSIDE PLASMA REGION)
-                        j = 1
-                        k = 2
-                        N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
-                        return N
-                    def Nedge(r,z,Xe,edge):
-                        # SHAPE FUNCTION IN PHYSICAL SPACE FOR NODE ALONG THE EDGE FOR WHICH FIND THE INTERSECTION WITH LEVEL-SET 0-CONTOUR
-                        j = (edge+1)%3
-                        k = (edge+2)%3
-                        N = Xe[j,0]*Xe[k,1]-Xe[k,0]*Xe[j,1]+(Xe[j,1]-Xe[k,1])*r+(Xe[k,0]-Xe[j,0])*z
-                        return N
-                    
-                    # TRANSCENDENTAL EQUATION TO SOLVE
-                    f = N0(r,z,Xe)*LSe[0] + Nedge(r,z,Xe,edge)*LSe[edge]
-                    return f
-                
-                # SOLVE TRANSCENDENTAL EQUATION AND COMPUTE INTERSECTION COORDINATES
-                sol = optimize.root(fun, Xe[0,1], args=(r,Xe,LSe,edge))
-                self.Xeint[0,i,:] = [r, sol.x]
-                
-        self.Xemod = np.concatenate((Xe,self.Xeint[0,:,:]), axis = 0)
-        self.permu = pos
+        self.InterEdges = [Segment(index = interface_index,
+                                    ElOrder = 1,   # WE ARE ONLY INTEREDTED IN THE VERTICES OF THE SEGMENT CUTING THE ELEMENT ->> 2 NODES 
+                                    Xeint = np.zeros([2,self.dim]),  # HERE WILL BE STORED THE SEGMENT VERTICES COORDINATES
+                                    int_edges = np.zeros([2,2])) for interf in range(self.Neint)]   # HERE WILL BE STORED THE LOCAL INDICES OF THE VERTICES DEFINING THE EDGES WHERE THE INTERSECTION POINTS LIE
+        
+        for interf in range(self.Neint):
+            k = 0
+            self.InterEdges[interf].int_edges = np.zeros([2,2],dtype=int)
+            for i in range(self.numedges):  # Loop over elemental edges
+                # Check for sign change along the edge
+                if LSe[i] * LSe[(i + 1) % self.numedges] < 0:
+                    # Store on which edge is located the intersection point
+                    self.InterEdges[interf].int_edges[k,:] = [i,(i + 1) % self.numedges]
+                    # Interpolate to find intersection point
+                    t = LSe[i] / (LSe[i] - LSe[(i + 1) % self.numedges])
+                    self.InterEdges[interf].Xeint[k,:] = (1 - t) * self.Xe[i,:] + t * self.Xe[(i + 1) % self.numedges,:]
+                    k += 1
+        
         return 
     
     
@@ -215,29 +149,31 @@ class Element:
         Input: - Tbound: # MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
         
         COMPUTED ATTRIBUTES:
-                - Neint: NUMBER OF INTERFACES IN ELEMENT
-                - Xeint: PHYSICAL INTERFACE NODAL COORDINATES 
-                - Xemod: MODIFIED ELEMENTAL NODAL MATRIX (PHYSICAL COORDINATES)
-                - permu: PERMUTATIONS IN THE CONECTIVITY SO THAT THE COMMON NODE IS FIRST
+                * FOR ELEMENT
+                    - Neint: NUMBER OF INTERFACES IN ELEMENT
+                * FOR INTERFACE SEGMENT
+                    - Xeint: PHYSICAL INTERFACE SEGMENT VERTICES COORDINATES 
+                    - inter_edges: LOCAL INDICES OF VERTICES WHERE SEGMENT ENDS ARE LOCATED
                 """
         
         # LOOK WHICH BOUNDARIES ARE ASSOCIATED TO THE ELEMENT
-        self.interface = np.where(Tbound[:,-1] == self.index)[0]         # GLOBAL INDEX FOR COMPUTATIONAL DOMAIN'S BOUNDARY ELEMENTAL EDGE
-        self.Neint = len(self.interface)                                 # NUMBER OF ELEMENTAL EDGES ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
-        self.Xeint = np.zeros([self.Neint,2,self.dim])                   # PHYSICAL INTERFACE NODAL COORDINATES
-        self.Teint = np.zeros([self.Neint,self.nedge], dtype=int)        # BOUNDARY EDGES CONNECTIVITY MATRIX (LOCAL INDEXES) 
+        interface = np.where(Tbound[:,-1] == self.index)[0]         # GLOBAL INDEX FOR COMPUTATIONAL DOMAIN'S BOUNDARY ELEMENTAL EDGE
+        self.Neint = len(interface)                                 # NUMBER OF ELEMENTAL EDGES ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
         
-        for edge, index in enumerate(self.interface):
+        self.InterEdges = [Segment(index = interface[interf],
+                                    ElOrder = 1,   # WE ARE ONLY INTEREDTED IN THE VERTICES OF THE SEGMENT CUTING THE ELEMENT ->> 2 NODES 
+                                    Xeint = np.zeros([2,self.dim]),   # HERE WILL BE STORED THE SEGMENT VERTICES COORDINATES
+                                    int_edges = np.zeros([2])) for interf in range(self.Neint)]   # HERE WILL BE STORED THE LOCAL INDICES OF THE VERTICES DEFINING THE EDGES WHERE THE INTERSECTION POINTS LIE
+        
+        for interf, index in enumerate(interface):
             # FIND LOCAL INDEXES OF NODES ON EDGE 
-            for i in range(self.nedge):
-                self.Teint[edge,i] = np.where(Tbound[index,i] == self.Te)[0][0]
-            # FIND LOCAL INDEX OF NODE NOT ON EDGE
-            #different_node = set(self.Teint) ^ set(range(self.n))
-            #index_node_alone = different_node.pop()
+            self.InterEdges[interf].int_edges = np.zeros([len(Tbound[0,:-1])], dtype=int)
+            for i in range(len(Tbound[0,:-1])):
+                self.InterEdges[interf].int_edges[i] = np.where(Tbound[index,i] == self.Te)[0][0]
             # COORDINATES OF NODES ON EDGE
-            self.Xeint[edge,:,:] = self.Xe[self.Teint[edge,:],:]
+            self.InterEdges[interf].Xeint = self.Xe[self.InterEdges[interf].int_edges,:]
             
-        return
+        return 
     
     
     ##################################################################################################
@@ -247,48 +183,52 @@ class Element:
     def InterfaceNormal(self):
         """ This function computes the interface normal vector pointing outwards. """
         
-        self.NormalVec = np.zeros([self.Neint,self.dim])
         for edge in range(self.Neint):
-            dx = self.Xeint[edge,1,0] - self.Xeint[edge,0,0]
-            dy = self.Xeint[edge,1,1] - self.Xeint[edge,0,1]
+            dx = self.InterEdges[edge].Xeint[1,0] - self.InterEdges[edge].Xeint[0,0]
+            dy = self.InterEdges[edge].Xeint[1,1] - self.InterEdges[edge].Xeint[0,1]
             ntest = np.array([-dy, dx])   # test this normal vector
             ntest = ntest/np.linalg.norm(ntest)   # normalize
-            Xintmean = np.array([np.mean(self.Xeint[edge,:,0]), np.mean(self.Xeint[edge,:,1])])  # mean point on interface
-            Xtest = Xintmean + 2*ntest  # physical point on which to test the Level-Set 
+            Xintmean = np.array([np.mean(self.InterEdges[edge].Xeint[:,0]), np.mean(self.InterEdges[edge].Xeint[:,1])])  # mean point on interface
+            Xtest = Xintmean + 3*ntest  # physical point on which to test the Level-Set 
             
             # INTERPOLATE LEVEL-SET ON XTEST
             LStest = 0
+            # LEVEL-SET NODAL VALUES
             if self.Dom == 0:  # ELEMENT CONTAINING PLASMA/VACUUM INTERFACE
                 LSe = self.PlasmaLSe
             elif self.Dom == 2:  # ELEMENT CONTAINING VACUUM VESSEL FIRST WALL
                 LSe = self.VacVessLSe
-            for i in range(self.n):
-                LStest += ShapeFunctionsPhysical(Xtest, self.Xe, self.ElType, self.ElOrder, i+1)*LSe[i]
+                
+            # INTERPOLATE LEVEL-SET USING WEIGHTS INVERSELY PROPORTIONAL TO DISTANCE
+            for inode in range(self.n):
+                # COMPUTE INTERPOLATION WEIGHTS
+                w = 1.0/np.sqrt((Xtest[0] - self.Xe[inode,0])**2 + (Xtest[1] - self.Xe[inode,1])**2)
+                # INTERPOLATE LEVEL-SET
+                LStest += w*LSe[inode]
                 
             # CHECK SIGN OF LEVEL-SET 
             if LStest > 0:  # TEST POINT OUTSIDE PLASMA REGION
-                self.NormalVec[edge,:] = ntest
+                self.InterEdges[edge].NormalVec = ntest
             else:   # TEST POINT INSIDE PLASMA REGION --> NEED TO TAKE THE OPPOSITE NORMAL VECTOR
-                self.NormalVec[edge,:] = -1*ntest
+                self.InterEdges[edge].NormalVec = -1*ntest
         return 
     
     def ComputationalDomainBoundaryNormal(self,Xmax,Xmin,Ymax,Ymin):
         """ This function computes the boundary edge(s) normal vector(s) pointing outwards. """
         
-        self.NormalVec = np.zeros([self.Neint,self.dim])
         for edge in range(self.Neint):
-            dx = self.Xeint[edge,1,0] - self.Xeint[edge,0,0]
-            dy = self.Xeint[edge,1,1] - self.Xeint[edge,0,1]
+            dx = self.InterEdges[edge].Xeint[1,0] - self.InterEdges[edge].Xeint[0,0]
+            dy = self.InterEdges[edge].Xeint[1,1] - self.InterEdges[edge].Xeint[0,1]
             ntest = np.array([-dy, dx])   # test this normal vector
             ntest = ntest/np.linalg.norm(ntest)   # normalize
-            Xintmean = np.array([np.mean(self.Xeint[edge,:,0]), np.mean(self.Xeint[edge,:,1])])  # mean point on interface
-            Xtest = Xintmean + 2*ntest  # physical point on which to test if outside of computational domain 
+            Xintmean = np.array([np.mean(self.InterEdges[edge].Xeint[:,0]), np.mean(self.InterEdges[edge].Xeint[:,1])])  # mean point on interface
+            Xtest = Xintmean + 3*ntest  # physical point on which to test if outside of computational domain 
             
             # CHECK IF TEST POINT IS OUTSIDE COMPUTATIONAL DOMAIN
             if Xtest[0] < Xmin or Xmax < Xtest[0] or Xtest[1] < Ymin or Ymax < Xtest[1]:  
-                self.NormalVec[edge,:] = ntest
+                self.InterEdges[edge].NormalVec = ntest
             else: 
-                self.NormalVec[edge,:] = -1*ntest
+                self.InterEdges[edge].NormalVec = -1*ntest
         return
     
     
@@ -297,13 +237,16 @@ class Element:
     ##################################################################################################
     
     @staticmethod
-    def CheckNodeOnEdge(x,Xe,TOL):
+    def CheckNodeOnEdge(x,ElType,Xe,TOL):
         """ Function which checks if point with coordinates x is on any edge of the element with nodal coordinates Xe. """
-        n = np.shape(Xe)[0]
+        if ElType == 1:  # TRIANGULAR ELEMENT
+            vertices = 3
+        elif ElType == 2:  # QUADRILATERAL ELEMENT
+            vertices = 4
         edgecheck = False
-        for edge in range(n):
-            i = edge
-            j = (edge+1)%n
+        for vertexnode in range(vertices):
+            i = vertexnode
+            j = (vertexnode+1)%vertices
             if abs(Xe[j,0]-Xe[i,0]) < 1e-6:  # infinite slope <=> vertical edge
                 if abs(Xe[i,0]-x[0]) < TOL:
                     edgecheck = True
@@ -319,19 +262,14 @@ class Element:
             return "Point not on edges"
         
     
-    @staticmethod
-    def Tessellation(Mode,**kwargs):
+    def ElementTessellation(self):
         """ This function performs the TESSELLATION of an element with nodal coordinates Xe and interface coordinates Xeint (intersection with edges) 
-        Input: - Mode: for Mode="REFERENCE" we pass the input (Xe,Xeint,shortedge); for Mode="PHYSICAL" we pass input (Xemod) 
-               - Xe: element nodal coordinates 
-               - Xeint: coordinates of intersection points between interface and edges 
-               - shortedge: edge for which the distance between common node and interface intersection is shortest IN THE PHYSICAL ELEMENT 
-               - Xemod: modified nodal coordinate matrix, where the first row is the common node to both edge intersecting the interface
+        
         Output: - TeTESS: Tessellation connectivity matrix such that 
                         TeTESS = [[Connectivities for subelement 1]
                                   [Connectivities for subelement 2]
                                                 ...          
-                - for Mode=0, XeTESS is outputed as well. XeTESS: Nodal coordinates matrix storing the coordinates of the element vertex and interface points                   
+                - XeTESS: Nodal coordinates matrix storing the coordinates of the element vertex and interface points                   
                 """
                 
         # FIRST WE NEED TO DETERMINE WHICH IS THE VERTEX COMMON TO BOTH EDGES INTERSECTING WITH THE INTERFACE
@@ -343,59 +281,218 @@ class Element:
         # IF INPUT Xemod IS PROVIDED, THE TESSELLATION IS DONE ACCORDINGLY TO MODIFIED NODAL MATRIX Xemod WHICH IS ASSUMED TO HAS THE PREVIOUSLY DESCRIBED STRUCTURE.
         # IF NOT, THE COMMON NODE IS DETERMINED (THIS IS THE CASE FOR INSTANCE WHEN THE REFERENCE ELEMENT IS TESSELLATED).
                 
-        if Mode == "PHYSICAL":
-            XeTESS = kwargs['Xemod']
-            # ONCE THE NODAL MATRIX IS ORGANISED, THE CONNECTIVITIES ARE TRIVIAL AND CAN BE HARD-CODED 
-            TeTESS = np.zeros([3, 3], dtype = int)  # connectivities for 3 subtriangles
-            TeTESS[0,:] = [0, 3, 4]  # first triangular subdomain is common node and intersection nodes
-
-            # COMPARE DISTANCE INTERFACE-(EDGE NODE)
-            edge = 1
-            distance1 = np.linalg.norm(XeTESS[edge,:]-XeTESS[edge+2,:])
-            edge = 2
-            distance2 = np.linalg.norm(XeTESS[edge,:]-XeTESS[edge+2,:])
-
-            if distance1 <= distance2:
-                TeTESS[1,:] = [3, 1, 2]
-                TeTESS[2,:] = [3, 4, 2]
-                shortedge = 1
-            if distance1 > distance2:
-                TeTESS[1,:] = [4, 2, 1]
-                TeTESS[2,:] = [4, 3, 1]
-                shortedge = 2
+        # LEVEL-SET NODAL VALUES
+        if self.Dom == 0:  # ELEMENT CONTAINING PLASMA/VACUUM INTERFACE
+            LSe = self.PlasmaLSe
+        elif self.Dom == 2:  # ELEMENT CONTAINING VACUUM VESSEL FIRST WALL
+            LSe = self.VacVessLSe
                 
-            return TeTESS, shortedge
+        for interf in range(self.Neint):  # IN ALL CASES THIS IS ALWAYS GONNA BE 1 ITERATION, BECAUSE FOR CUT ELEMENTS THE INTERFACE IS APPROXIMATED USING A SINGLE SEGMENT
+            if self.ElType == 1:  # TRIANGULAR ELEMENT
+                # MODIFIED NODAL MATRIX AND CONECTIVITIES, ACCOUNTING FOR 3 SUBTRIANGLES 
+                XeTESS = np.concatenate((self.Xe[:self.numvertices,:],self.InterEdges[interf].Xeint),axis=0)
+                TeTESS = np.zeros([3,3],dtype=int)
                 
-        elif Mode == "REFERENCE":
-            Xe = kwargs['Xe']
-            Xeint = kwargs['Xeint']
-            Nint = np.shape(Xeint)[0]  # number of intersection points
-            edgenodes = np.zeros(np.shape(Xeint), dtype=int)
-            nodeedgeinter = np.zeros([Nint], dtype=int)
-            for i in range(Nint):
-                edgenodes[i,:] = Element.CheckNodeOnEdge(Xeint[i,:],Xe,1e-4)
-            commonnode = (set(edgenodes[0,:])&set(edgenodes[1,:])).pop()
-            for i in range(Nint):
-                edgenodesset = set(edgenodes[i,:])
-                edgenodesset.remove(commonnode)
-                nodeedgeinter[i] = edgenodesset.pop()
+                # LOOK FOR COMMON NODE BY USING SIGN OF prod(LSe)
+                #  -> IF prod(LSe) > 0, THEN COMMON NODE HAS LS > 0
+                #  -> IF prod(LSe) < 0, THEN COMMON NODE HAS LS < 0
+                for ivertex in range(self.numvertices):
+                    if np.sign(LSe[ivertex]) == np.sign(np.prod(LSe[:self.numvertices])):
+                        commonnode = ivertex
+                        break
+                edgenode = np.zeros([2],dtype=int)
+                distance = np.zeros([2])
+                for iedge in range(2):
+                    for node in self.InterEdges[interf].int_edges[iedge,:]:
+                        if node != commonnode:
+                            edgenode[iedge] = node
+                            distance[iedge] = np.linalg.norm(self.Xe[node,:]-self.InterEdges[interf].Xeint[iedge,:])
+                
+                TeTESS[0,:] = [commonnode, 3,4]  # SUBELEMEMENT WITH COMMON NODE
+                if distance[0] < distance[1]:
+                    TeTESS[1,:] = [edgenode[0],edgenode[1],3]
+                    TeTESS[2,:] = [edgenode[1],3,4]
+                if distance[0] >= distance[1]:
+                    TeTESS[1,:] = [edgenode[1],edgenode[0],4]
+                    TeTESS[2,:] = [edgenode[0],3,4]
+                    
+                if self.Dom == 0:   # PLASMA/VACUUM INTERFACE
+                    if LSe[commonnode] < 0:
+                        DomTESS = np.array([-1,1,1])
+                    else:
+                        DomTESS = np.array([1,-1,-1])
+                elif self.Dom == 2:  # VACUUM VESSEL FIRST WALL INTERFACE
+                    if LSe[commonnode] < 0:
+                        DomTESS = np.array([1,3,3])
+                    else:
+                        DomTESS = np.array([3,1,1])
+                
+            elif self.ElType == 2:  # QUADRILATERAL ELEMENT
+                # MODIFIED NODAL MATRIX
+                XeTESS = np.concatenate((self.Xe[:self.numvertices,:],self.InterEdges[interf].Xeint),axis=0)
+                # LOOK FOR TESSELLATION CONFIGURATION BY USING SIGN OF prod(LSe)
+                #  -> IF prod(LSe) > 0, THEN CUT SPLITS PARENT QUADRILATERAL ELEMENT INTO 2 CHILD QUADRILATERAL ELEMENTS LS > 0
+                #  -> IF prod(LSe) < 0, THEN CUT SPLITS PARENT QUADRILATERAL ELEMENT INTO PENTAGON AND TRIANGLE
+                if np.prod(LSe[:self.numvertices]) > 0:
+                    # MODIFIED CONECTIVITIES, ACCOUNTING FOR 2 SUBQUADRILATERALS
+                    TeTESS = np.zeros([2,4],dtype=int)
+                    nodepositive = []
+                    nodenegative = []
+                    for iedge, edge in enumerate(self.InterEdges[interf].int_edges):
+                        for node in edge:
+                            if LSe[node] > 0:
+                                nodepositive.append(node)
+                            else:
+                                nodenegative.append(node)
+                    TeTESS[0,:] = np.concatenate((np.array([4]),np.array(nodepositive),np.array([5])),axis=0)
+                    TeTESS[1,:] = np.concatenate((np.array([4]),np.array(nodenegative),np.array([5])),axis=0)
+                    
+                    if self.Dom == 0:   # PLASMA/VACUUM INTERFACE
+                        DomTESS = np.array([1,-1])
+                    elif self.Dom == 2:  # VACUUM VESSEL FIRST WALL INTERFACE
+                        DomTESS = np.array([3,1])
+                    
+                else:
+                    # MODIFIED CONECTIVITIES, ACCOUNTING FOR 4 SUBTRIANGLES
+                    TeTESS = np.zeros([4,3],dtype=int)
+                    # LOOK FOR DIFFERENT LS SIGN VERTEX NODE
+                    if len(np.where(LSe[:self.numvertices]<0)[0]) > len(np.where(LSe[:self.numvertices]>0)[0]):  # if more LSe < 0 than LSe > 0 -> DIFFERENT LS SIGN VERTEX IS LS > 0
+                        for inode in range(self.numvertices):
+                            if LSe[inode] > 0:
+                                commonnode = inode
+                            if np.isin(inode,np.concatenate((self.InterEdges[interf].int_edges[0],self.InterEdges[interf].int_edges[1]),axis=0)):
+                                pass
+                            else:
+                                oppositenode = inode
+                    else:  # if less LSe < 0 than LSe > 0 -> DIFFERENT LS SIGN VERTEX IS LS < 0
+                        for inode in range(self.numvertices):
+                            if LSe[inode] < 0:
+                                commonnode = inode
+                            if np.isin(inode,np.concatenate((self.InterEdges[interf].int_edges[0],self.InterEdges[interf].int_edges[1]),axis=0)):
+                                pass
+                            else:
+                                oppositenode = inode
+                    edgenode = np.zeros([2],dtype=int)
+                    for iedge, edge in enumerate(self.InterEdges[interf].int_edges):
+                        for node in edge:
+                            if node != commonnode:
+                                edgenode[iedge] = node
+                        
+                    TeTESS[0,:] = [commonnode,4,5]
+                    TeTESS[1,:] = [4,edgenode[0],oppositenode]
+                    TeTESS[2,:] = [5,edgenode[1],oppositenode]
+                    TeTESS[3,:] = [4,5,oppositenode]
+                    
+                    if self.Dom == 0:   # PLASMA/VACUUM INTERFACE
+                        if LSe[commonnode] < 0:
+                            DomTESS = np.array([-1,1,1,1])
+                        else:
+                            DomTESS = np.array([1,-1,-1,-1])
+                    elif self.Dom == 2:  # VACUUM VESSEL FIRST WALL INTERFACE
+                        if LSe[commonnode] < 0:
+                            DomTESS = np.array([1,3,3,3])
+                        else:
+                            DomTESS = np.array([3,1,1,1])
+                
+            return XeTESS, TeTESS, DomTESS
         
-            Xe = Xe[np.concatenate((np.array([commonnode]), nodeedgeinter), axis=0),:]
-            # MODIFIED NODAL MATRIX AND CONECTIVITIES, ACCOUNTING FOR 3 SUBTRIANGLES 
-            XeTESS = np.concatenate((Xe, Xeint), axis=0)
-            
-            # ONCE THE NODAL MATRIX IS ORGANISED, THE CONNECTIVITIES ARE TRIVIAL AND CAN BE HARD-CODED 
-            TeTESS = np.zeros([3, 3], dtype = int)  # connectivities for 3 subtriangles
-            TeTESS[0,:] = [0, 3, 4]  # first triangular subdomain is common node and intersection nodes
-
-            if kwargs["shortedge"] == 1:
-                TeTESS[1,:] = [3, 1, 2]
-                TeTESS[2,:] = [3, 4, 2]
-            if kwargs["shortedge"] == 2:
-                TeTESS[1,:] = [4, 2, 1]
-                TeTESS[2,:] = [4, 3, 1]
+        
+    def ReferenceElementTessellation(self,XIeint):
+        """ This function performs the TESSELLATION of an element with nodal coordinates Xe and interface coordinates Xeint (intersection with edges) 
+        
+        Output: - TeTESS: Tessellation connectivity matrix such that 
+                        TeTESS = [[Connectivities for subelement 1]
+                                  [Connectivities for subelement 2]
+                                                ...          
+                - XeTESS: Nodal coordinates matrix storing the coordinates of the element vertex and interface points                   
+                """
                 
-            return XeTESS, TeTESS
+        # FIRST WE NEED TO DETERMINE WHICH IS THE VERTEX COMMON TO BOTH EDGES INTERSECTING WITH THE INTERFACE
+        # AND ORGANISE THE NODAL MATRIX ACCORDINGLY SO THAT
+        #       - THE FIRST ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH IS SHARED BY BOTH EDGES INTERSECTING THE INTERFACE 
+        #       - THE SECOND ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH DEFINES THE EDGE ON WHICH THE FIRST INTERSECTION POINT IS LOCATED
+        #       - THE THIRD ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH DEFINES THE EDGE ON WHICH THE SECOND INTERSECTION POINT IS LOCATED
+        # HOWEVER, WHEN LOOKING FOR THE LINEAR APPROXIMATION OF THE PHYSICAL INTERFACE THIS PROCESS IS ALREADY DONE, THEREFORE WE CAN SKIP IT. 
+        # IF INPUT Xemod IS PROVIDED, THE TESSELLATION IS DONE ACCORDINGLY TO MODIFIED NODAL MATRIX Xemod WHICH IS ASSUMED TO HAS THE PREVIOUSLY DESCRIBED STRUCTURE.
+        # IF NOT, THE COMMON NODE IS DETERMINED (THIS IS THE CASE FOR INSTANCE WHEN THE REFERENCE ELEMENT IS TESSELLATED).
+    
+        if self.ElType == 1:  # TRIANGULAR ELEMENT
+            
+            XIe = np.array([[1,0], [0,1], [0,0]])
+            
+            # MODIFIED NODAL MATRIX AND CONECTIVITIES, ACCOUNTING FOR 3 SUBTRIANGLES 
+            XeTESS = np.concatenate((XIe,XIeint),axis=0)
+            TeTESS = np.zeros([3,3],dtype=int)
+            
+            # LOOK FOR COMMON NODE
+            edgenodes = np.zeros([2,2],dtype=int)
+            edgenode = np.zeros([2],dtype=int)
+            distance = np.zeros([2])
+            
+            for i in range(2):
+                edgenodes[i,:] = self.CheckNodeOnEdge(XIeint[i,:],self.ElType,XIe,1e-4)
+            commonnode = (set(edgenodes[0,:])&set(edgenodes[1,:])).pop()
+            # LOOK FOR NODE ON EDGE WHERE INTERSECTION POINT LIES BUT OTHER THAN COMMON NODE AND COMPUTE DISTANCE
+            for i in range(2):
+                edgenodeset = set(edgenodes[i,:])
+                edgenodeset.remove(commonnode)
+                edgenode[i] = edgenodeset.pop()
+                distance[i] = np.linalg.norm(XIeint[i,:]-XIe[edgenode[i],:])
+                        
+            #print("common node = ", commonnode)
+            #print("edge nodes = ", edgenode)
+            #print("distances = ", distance)
+            
+            TeTESS[0,:] = [commonnode, 3,4]  # SUBELEMEMENT WITH COMMON NODE
+            if distance[0] < distance[1]:
+                TeTESS[1,:] = [edgenode[0],edgenode[1],3]
+                TeTESS[2,:] = [edgenode[1],3,4]
+            if distance[0] >= distance[1]:
+                TeTESS[1,:] = [edgenode[1],edgenode[0],4]
+                TeTESS[2,:] = [edgenode[0],3,4]
+            
+        elif self.ElType == 2:  # QUADRILATERAL ELEMENT
+            
+            XIe = np.array([[-1,-1], [1,-1], [1,1], [-1,1]])
+            
+            # MODIFIED NODAL MATRIX
+            XeTESS = np.concatenate((XIe,XIeint),axis=0)
+            
+            # DIFFERENT CASES DEPENDING ON PHYSICAL ELEMENT TESSELLATION
+            if self.Nsub == 2:
+                # MODIFIED CONECTIVITIES, ACCOUNTING FOR 2 SUBQUADRILATERALS
+                TeTESS = np.array([[4,0,1,5],
+                                    [4,3,3,5]])
+                
+            elif self.Nsub == 4:
+                # MODIFIED CONECTIVITIES, ACCOUNTING FOR 4 SUBTRIANGLES
+                TeTESS = np.zeros([4,3],dtype=int)
+                
+                # LOOK FOR COMMON NODE
+                edgenodes = np.zeros([2,2],dtype=int)
+                edgenode = np.zeros([2],dtype=int)
+                distance = np.zeros([2])
+                for i in range(2):
+                    edgenodes[i,:] = self.CheckNodeOnEdge(XIeint[i,:],self.ElType,XIe,1e-4)
+                commonnode = (set(edgenodes[0,:])&set(edgenodes[1,:])).pop()
+                # LOOK FOR NODE ON EDGE WHERE INTERSECTION POINT LIES BUT OTHER THAN COMMON NODE
+                for i in range(2):
+                    edgenodeset = set(edgenodes[i,:])
+                    edgenodeset.remove(commonnode)
+                    edgenode[i] = edgenodeset.pop()
+                # LOOK FOR OPPOSITE NODE
+                for i in range(4):  # LOOP OVER VERTEX
+                    if np.isin(edgenodes, i).any():  # CHECK IF VERTEX IS PART OF THE EDGES ON WHICH THE INTERSECTION POINTS LIE
+                        pass
+                    else:
+                        oppositenode = i
+                        
+                TeTESS[0,:] = [commonnode,4,5]
+                TeTESS[1,:] = [4,edgenode[0],oppositenode]
+                TeTESS[2,:] = [5,edgenode[1],oppositenode]
+                TeTESS[3,:] = [4,5,oppositenode]
+                
+        return XeTESS, TeTESS
         
         
     ##################################################################################################
@@ -461,39 +558,36 @@ class Element:
          
         # COMPUTE THE STANDARD QUADRATURE ON THE REFERENCE SPACE IN 1D
         #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
-        self.XIg1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,Order)
+        XIg1D, Wg1D, Ng1D = GaussQuadrature(0,Order)
         # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
         #### QUADRATURE TO INTEGRATE LINES (1D)
-        self.N1D, self.dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.XIg1D, 0, Order-1, self.nedge)
+        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1D, 0, Order-1, self.nedge)
         
         # PRECOMPUTE THE NECESSARY INTEGRATION ENTITIES EVALUATED AT THE STANDARD GAUSS INTEGRATION NODES ->> STANDARD FEM APPROACH
         # WE COMPUTE THUS:
         #       - THE JACOBIAN OF THE TRANSFORMATION BETWEEN REFERENCE AND PHYSICAL 1D SPACES MATRIX DETERMINANT
         #       - THE STANDARD PHYSICAL GAUSS INTEGRATION NODES MAPPED FROM THE REFERENCE 1D ELEMENT
-          
-        self.XIgint = np.zeros([self.Neint,self.Ng1D,self.dim])
-        self.Nint = np.zeros([self.Neint,self.Ng1D,self.n])
-        self.dNdxiint = np.zeros([self.Neint,self.Ng1D,self.n])
-        self.dNdetaint = np.zeros([self.Neint,self.Ng1D,self.n])
-        self.Xgint = np.zeros([self.Neint,self.Ng1D,self.dim])
-        self.detJgint = np.zeros([self.Neint,self.Ng1D])
         
         for edge in range(self.Neint):
+            self.InterEdges[edge].Ngaussint = Ng1D
+            self.InterEdges[edge].Wgint = Wg1D
+            self.InterEdges[edge].detJgint = np.zeros([self.InterEdges[edge].Ngaussint])
+            
             # IDENTIFY EDGE ON REFERENCE ELEMENT CORRESPONDING TO VACUUM VESSEL FIRST WALL EDGE
-            XIeint = np.zeros(np.shape(self.Xeint[edge,:,:]))
+            XIeint = np.zeros(np.shape(self.InterEdges[edge].Xeint[:,:]))
             for i in range(2):
-                XIeint[i,:] = self.InverseMapping(self.Xeint[edge,i,:])
+                XIeint[i,:] = self.InverseMapping(self.InterEdges[edge].Xeint[i,:])
             # MAP 1D REFERENCE STANDARD GAUSS INTEGRATION NODES ON REFERENCE VACUUM VESSEL FIRST WALL EDGE 
-            self.XIgint[edge,:,:] = self.N1D @ XIeint
+            self.InterEdges[edge].XIgint = N1D @ XIeint
             # EVALUATE 2D REFERENCE SHAPE FUNCTION ON REFERENCE VACUUM VESSEL FIRST WALL EDGE GAUSS NODES
-            self.Nint[edge,:,:], self.dNdxiint[edge,:,:], self.dNdetaint[edge,:,:] = EvaluateReferenceShapeFunctions(self.XIgint[edge,:,:], self.ElType, self.ElOrder, self.n)
+            self.InterEdges[edge].Nint, self.InterEdges[edge].dNdxiint, self.InterEdges[edge].dNdetaint = EvaluateReferenceShapeFunctions(self.InterEdges[edge].XIgint, self.ElType, self.ElOrder, self.n)
             # COMPUTE MAPPED GAUSS NODES
-            self.Xgint[edge,:,:] = self.N1D @ self.Xeint[edge,:,:]
+            self.InterEdges[edge].Xgint = N1D @ self.InterEdges[edge].Xeint
             # COMPUTE JACOBIAN INVERSE AND DETERMINANT
-            Rmeanint = np.mean(self.Xeint[edge,:,:][:,0])   # mean elemental radial position
-            for ig in range(self.Ng1D):
-                self.detJgint[edge,ig] = Jacobian1D(self.Xeint[edge,:,:][:,0],self.Xeint[edge,:,:][:,1],self.dNdxi1D[ig,:])  
-                self.detJgint[edge,ig] *= 2*np.pi*Rmeanint   # ACCOUNT FOR AXISYMMETRICAL
+            Rmeanint = np.mean(self.InterEdges[edge].Xeint[:,0])   # mean elemental radial position
+            for ig in range(self.InterEdges[edge].Ngaussint):
+                self.InterEdges[edge].detJgint[ig] = Jacobian1D(self.InterEdges[edge].Xeint[:,0],self.InterEdges[edge].Xeint[:,1],dNdxi1D[ig])  
+                self.InterEdges[edge].detJgint[ig] *= 2*np.pi*Rmeanint   # ACCOUNT FOR AXISYMMETRICAL
                 
         return
     
@@ -531,100 +625,82 @@ class Element:
             #    2. MAP 1D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE INTERFACE
         """
         
-        #### STANDARD REFERENCE ELEMENT QUADRATURE TO INTEGRATE SURFACES (2D)
-        XIg2DFEM, self.Wg2D, self.Ng2D = GaussQuadrature(self.ElType,Order)
-        #### STANDARD REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
-        XIg1DFEM, self.Wg1D, self.Ng1D = GaussQuadrature(0,Order)
-        
-        # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
-        # EVALUATE REFERENCE SHAPE FUNCTIONS 
-        N, foo, foo = EvaluateReferenceShapeFunctions(XIg2DFEM, self.ElType, self.ElOrder, self.n)
-        #### QUADRATURE TO INTEGRATE LINES (1D)
-        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1DFEM, 0, Order-1, self.nedge)
-        
         #### THE STANDARD APPROACH IS MODIFIED THEN ACCORDING TO THE INTERFACE IN ORDER TO GENERATE A NEW ADAPTED QUADRATURE
         ## THE FOLLOWING METHODOLOGY IS FOLLOWED: IN ORDER TO INTERGRATE IN THE CUT ELEMENT, THE ORIGINAL PHYSICAL ELEMENT IS 
         ## TESSELLATED INTO SMALLER SUBELEMENTS. FOR EACH SUBELEMENT AN ADAPTED NUMERICAL INTEGRATION QUADRATURE IS COMPUTED FROM 
         ## THE STANDARD ONE.
         
         ######## GENERATE SUBELEMENTAL STRUCTURE
-        # I. PERFORM TESSELLATION ON PHYSICAL ELEMENT AND GENERATE SUBELEMENTS
-        self.Temod, self.shortedge = self.Tessellation(Mode="PHYSICAL",Xemod=self.Xemod)
-        self.Nsub = np.shape(self.Temod)[0]
-        self.SubElements = [Element(index = subelem, ElType = self.ElType, ElOrder = self.ElOrder,
-                                    Xe = self.Xemod[self.Temod[subelem,:]],
+        # PERFORM TESSELLATION ON PHYSICAL ELEMENT AND GENERATE SUBELEMENTS
+        self.XeTESS, self.TeTESS, self.DomTESS = self.ElementTessellation()
+        self.Nsub = np.shape(self.TeTESS)[0]
+        self.SubElements = [None]*self.Nsub
+        for subelem in range(self.Nsub):
+            if len(self.XeTESS[self.TeTESS[subelem,:],0]) == 3:  # LINEAR TRIANGULAR SUBELEM
+                SubElType = 1
+            elif len(self.XeTESS[self.TeTESS[subelem,:],0]) == 4:  # LINEAR QUADRILATERAL SUBELEM
+                SubElType = 2
+            self.SubElements[subelem] = Element(index = subelem, ElType = SubElType, ElOrder = 1,
+                                    Xe = self.XeTESS[self.TeTESS[subelem,:],:],
                                     Te = self.Te,
                                     PlasmaLSe = None, 
-                                    VacVessLSe= None) for subelem in range(self.Nsub)]
-        
-        # II. DETERMINE ON TO WHICH REGION (INSIDE OR OUTSIDE) FALLS EACH SUBELEMENT
-        if self.Dom == 0:  # PLASMA BOUNDARY ELEMENT, CUT BY THE PLASMA/VACUUM INTERFACE
-            if self.PlasmaLSe[self.permu[0]] < 0:  # COMMON NODE YIELD LS < 0 -> INSIDE REGION
-                Dommod = np.array([-1,1,1])
-            else:
-                Dommod = np.array([1,-1,-1])
-                
-        elif self.Dom == 2:  # VACUUM VESSEL FIRST WALL ELEMENT, CUT BY THE FIRST WALL GEOMETRY INTERFACE
-            if self.VacVessLSe[self.permu[0]] < 0:  # COMMON NODE YIELD LS < 0 -> INSIDE REGION
-                Dommod = np.array([1,3,3])
-            else:
-                Dommod = np.array([3,1,1])
+                                    VacVessLSe= None)
+            # ASSIGN A REGION TO EACH SUBELEMENT
+            self.SubElements[subelem].Dom = self.DomTESS[subelem]
             
         ######### MODIFIED QUADRATURE TO INTEGRATE OVER SUBELEMENTS
         # 1. MAP THE PHYSICAL INTERFACE ON THE REFERENCE ELEMENT
-        XIeint = np.zeros(np.shape(self.Xeint[0,:,:]))
+        self.XIeint = np.zeros(np.shape(self.InterEdges[0].Xeint))
         for i in range(2):
-            XIeint[i,:] = self.InverseMapping(self.Xeint[0,i,:])
+            self.XIeint[i,:] = self.InverseMapping(self.InterEdges[0].Xeint[i,:])
             
         # 2. DO TESSELLATION ON REFERENCE ELEMENT
-        XIe = np.array([[1,0], [0,1], [0,0]])
-        XIemod, TemodREF = self.Tessellation(Mode="REFERENCE",Xe=XIe,Xeint=XIeint,shortedge=self.shortedge)
+        self.XIeTESS, self.TeTESSREF = self.ReferenceElementTessellation(self.XIeint)
         
         # 3. MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS AND EVALUATE INTEGRATION ENTITIES ON THEM
         for i, subelem in enumerate(self.SubElements):
+            #### STANDARD REFERENCE ELEMENT QUADRATURE TO INTEGRATE SURFACES (2D)
+            XIg2DFEM, subelem.Wg2D, subelem.Ng2D = GaussQuadrature(subelem.ElType,Order)
+            # EVALUATE SUBELEMENTAL REFERENCE SHAPE FUNCTIONS 
+            N2D, foo, foo = EvaluateReferenceShapeFunctions(XIg2DFEM, subelem.ElType, subelem.ElOrder, subelem.n)
+        
             # MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS  ->> MODIFIED 2D QUADRATURE FOR SUBELEMENTS
-            subelem.XIg2D = N @ XIemod[TemodREF[i,:]]
-            # EVALUATE REFERENCE SHAPE FUNCTIONS ON MODIFIED REFERENCE QUADRATURE
-            subelem.N, subelem.dNdxi, subelem.dNdeta = EvaluateReferenceShapeFunctions(subelem.XIg2D, subelem.ElType, subelem.ElOrder, subelem.n)
+            subelem.XIg2D = N2D @ self.XIeTESS[self.TeTESSREF[i,:]]
+            # EVALUATE ELEMENTAL REFERENCE SHAPE FUNCTIONS ON MODIFIED REFERENCE QUADRATURE
+            subelem.N, subelem.dNdxi, subelem.dNdeta = EvaluateReferenceShapeFunctions(subelem.XIg2D, self.ElType, self.ElOrder, self.n)
             # MAPP MODIFIED REFERENCE QUADRATURE ON PHYSICAL ELEMENT
             subelem.Xg2D = subelem.N @ self.Xe
-            # ASSIGN A REGION TO EACH SUBELEMENT
-            subelem.Dom = Dommod[i]
-            # ASSIGN STANDARD WEIGHTS AND NUMBER OF NODES
-            subelem.Ng2D = self.Ng2D
-            subelem.Ng1D = self.Ng1D
-            subelem.Wg2D = self.Wg2D
-            subelem.Wg1D = self.Wg1D
             
             # EVALUATE INTEGRATION ENTITIES (JACOBIAN INVERSE MATRIX AND DETERMINANT) ON MODIFIED QUADRATURES NODES
             subelem.invJg = np.zeros([subelem.Ng2D,subelem.dim,subelem.dim])
             subelem.detJg = np.zeros([subelem.Ng2D])
             Rmeansub = np.sum(subelem.Xe[:,0])/subelem.n   # mean subelemental radial position
             for ig in range(subelem.Ng2D):
-                subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(subelem.Xe[:,0],subelem.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])
+                #subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(subelem.Xe[:,0],subelem.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])
+                subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])   #### MIRAR ESTO EN FORTRAN !!
                 subelem.detJg[ig] *= 2*np.pi*Rmeansub   # ACCOUNT FOR AXISYMMETRICAL
                 
+        ######### MODIFIED QUADRATURE TO INTEGRATE OVER ELEMENTAL INTERFACES
+        #### STANDARD REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
+        XIg1DFEM, Wg1D, Ng1D = GaussQuadrature(0,Order)
+        #### QUADRATURE TO INTEGRATE LINES (1D)
+        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1DFEM, 0, Order-1, 2)
                 
-        ######### MODIFIED QUADRATURE TO INTEGRATE OVER INTERFACES
-        self.XIgint = np.zeros([self.Neint,self.Ng1D,self.dim])
-        self.Nint = np.zeros([self.Neint,self.Ng1D,self.n])
-        self.dNdxiint = np.zeros([self.Neint,self.Ng1D,self.n])
-        self.dNdetaint = np.zeros([self.Neint,self.Ng1D,self.n])
-        self.Xgint = np.zeros([self.Neint,self.Ng1D,self.dim])
-        self.detJgint = np.zeros([self.Neint,self.Ng1D])
-        
         for edge in range(self.Neint):
-            # 2. MAP 1D REFERENCE STANDARD GAUSS INTEGRATION NODES ON THE REFERENCE INTERFACE ->> MODIFIED 1D QUADRATURE FOR INTERFACE
-            self.XIgint[edge,:,:] = N1D @ XIeint
+            self.InterEdges[edge].Ngaussint = Ng1D
+            self.InterEdges[edge].Wgint = Wg1D
+            self.InterEdges[edge].detJgint = np.zeros([self.InterEdges[edge].Ngaussint])
+            # MAP 1D REFERENCE STANDARD GAUSS INTEGRATION NODES ON THE REFERENCE INTERFACE ->> MODIFIED 1D QUADRATURE FOR INTERFACE
+            self.InterEdges[edge].XIgint = N1D @ self.XIeint
             # EVALUATE 2D REFERENCE SHAPE FUNCTION ON INTERFACE MODIFIED QUADRATURE
-            self.Nint[edge,:,:], self.dNdxiint[edge,:,:], self.dNdetaint[edge,:,:] = EvaluateReferenceShapeFunctions(self.XIgint[edge,:,:], self.ElType, self.ElOrder, self.n)
+            self.InterEdges[edge].Nint, self.InterEdges[edge].dNdxiint, self.InterEdges[edge].dNdetaint = EvaluateReferenceShapeFunctions(self.InterEdges[edge].XIgint, self.ElType, self.ElOrder, self.n)
             # MAPP REFERENCE INTERFACE MODIFIED QUADRATURE ON PHYSICAL ELEMENT 
-            self.Xgint[edge,:,:] = N1D @ self.Xeint[edge,:,:]
+            self.InterEdges[edge].Xgint = N1D @ self.InterEdges[edge].Xeint
             
-            Rmeanint = np.mean(self.Xeint[edge,:,0])   # mean interface radial position
-            for ig in range(self.Ng1D):
-                self.detJgint[edge,ig] = Jacobian1D(self.Xeint[edge,:,0],self.Xeint[edge,:,1],dNdxi1D[ig,:])  
-                self.detJgint[edge,ig] *= 2*np.pi*Rmeanint   # ACCOUNT FOR AXISYMMETRICAL    
+            Rmeanint = np.mean(self.InterEdges[edge].Xeint[:,0])   # mean interface radial position
+            for ig in range(self.InterEdges[edge].Ngaussint):
+                self.InterEdges[edge].detJgint[ig] = Jacobian1D(self.InterEdges[edge].Xeint[:,0],self.InterEdges[edge].Xeint[:,1],dNdxi1D[ig,:])  
+                self.InterEdges[edge].detJgint[ig] *= 2*np.pi*Rmeanint   # ACCOUNT FOR AXISYMMETRICAL    
         return 
     
     
@@ -643,8 +719,8 @@ class Element:
             # SHAPE FUNCTIONS GRADIENT
             Ngrad = np.array([self.dNdxi[ig,:],self.dNdeta[ig,:]])
             # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM 
-            for i in range(self.n):   # ROWS ELEMENTAL MATRIX
-                for j in range(self.n):   # COLUMNS ELEMENTAL MATRIX
+            for i in range(len(self.Te)):   # ROWS ELEMENTAL MATRIX
+                for j in range(len(self.Te)):   # COLUMNS ELEMENTAL MATRIX
                     # COMPUTE LHS MATRIX TERMS
                     ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
                     LHS[self.Te[i],self.Te[j]] -= np.transpose((self.invJg[ig,:,:]@Ngrad[:,i]))@(self.invJg[ig,:,:]@Ngrad[:,j])*self.detJg[ig]*self.Wg2D[ig]
@@ -655,7 +731,7 @@ class Element:
         return 
     
     
-    def IntegrateElementalInterfaceTerms(self,PHI_g,beta,LHS,RHS):
+    def IntegrateElementalInterfaceTerms(self,beta,LHS,RHS):
         """ Input: - PHI_g: Interface condition, evaluated at physical gauss integration nodes
                    - beta: Nitsche's method penalty parameter
                    - LHS: global system Left-Hand-Side matrix 
@@ -664,25 +740,27 @@ class Element:
     
         # LOOP OVER EDGES ON COMPUTATIONAL DOMAIN'S BOUNDARY
         for edge in range(self.Neint):
+            # ISOLATE INTERFACE EDGE
+            EDGE = self.InterEdges[edge]
             # LOOP OVER GAUSS INTEGRATION NODES
-            for ig in range(self.Ng1D):  
+            for ig in range(EDGE.Ngaussint):  
                 # SHAPE FUNCTIONS GRADIENT
-                Ngrad = np.array([self.dNdxiint[edge,ig,:],self.dNdetaint[edge,ig,:]])
+                Ngrad = np.array([EDGE.dNdxiint[ig,:],EDGE.dNdetaint[ig,:]])
                 # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
-                for i in range(self.n):  # ROWS ELEMENTAL MATRIX
-                    for j in range(self.n):  # COLUMNS ELEMENTAL MATRIX
+                for i in range(len(self.Te)):  # ROWS ELEMENTAL MATRIX
+                    for j in range(len(self.Te)):  # COLUMNS ELEMENTAL MATRIX
                         # COMPUTE LHS MATRIX TERMS
                         ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
-                        LHS[self.Te[i],self.Te[j]] += self.Nint[edge,ig,i] * self.NormalVec[edge,:] @ Ngrad[:,j] * self.detJgint[edge,ig] * self.Wg1D[ig]
+                        LHS[self.Te[i],self.Te[j]] += EDGE.Nint[ig,i] * EDGE.NormalVec @ Ngrad[:,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                         ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
-                        LHS[self.Te[i],self.Te[j]] += self.NormalVec[edge,:] @ Ngrad[:,i]*(self.Nint[edge,ig,j] * self.detJgint[edge,ig] * self.Wg1D[ig])
+                        LHS[self.Te[i],self.Te[j]] += EDGE.NormalVec @ Ngrad[:,i]*(EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig])
                         ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
-                        LHS[self.Te[i],self.Te[j]] += beta * self.Nint[edge,ig,i] * self.Nint[edge,ig,j] * self.detJgint[edge,ig] * self.Wg1D[ig]
+                        LHS[self.Te[i],self.Te[j]] += beta * EDGE.Nint[ig,i] * EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                     # COMPUTE RHS VECTOR TERMS 
                     ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
-                    RHS[self.Te[i]] +=  PHI_g[edge,ig] * self.NormalVec[edge,:] @ Ngrad[:,i] * self.detJgint[edge,ig] * self.Wg1D[ig]
+                    RHS[self.Te[i]] +=  EDGE.PHI_g[ig] * EDGE.NormalVec @ Ngrad[:,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                     ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
-                    RHS[self.Te[i]] +=  beta * PHI_g[edge,ig] * self.Nint[edge,ig,i] * self.detJgint[edge,ig] * self.Wg1D[ig]
+                    RHS[self.Te[i]] +=  beta * EDGE.PHI_g[ig] * EDGE.Nint[ig,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
         return 
     
     
@@ -690,6 +768,16 @@ class Element:
     ################################ ELEMENT CHARACTERISATION ########################################
     ##################################################################################################
         
+def ElementalNumberOfEdges(elemType):
+    match elemType:
+        case 0:
+            numedges = 1
+        case 1:
+            numedges = 3
+        case 2:  
+            numedges = 4
+    return numedges     
+
     
 def ElementalNumberOfNodes(elemType, elemOrder):
     # ELEMENT TYPE -> 0: SEGMENT ;  1: TRIANGLE  ; 2: QUADRILATERAL

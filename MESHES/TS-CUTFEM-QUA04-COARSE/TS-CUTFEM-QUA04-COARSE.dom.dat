@@ -1,10 +1,10 @@
 $------------------------------------------------------------
 DIMENSIONS
-  NODAL_POINTS=         1828
-  ELEMENTS=             3494
+  NODAL_POINTS=          416
+  ELEMENTS=              375
   SPACE_DIMENSIONS=        2
-  TYPES_OF_ELEMENTS=      10,      0,      0,      0,      0
-  BOUNDARIES=            160
+  TYPES_OF_ELEMENTS=       0,      0,     12,      0,      0
+  BOUNDARIES=             80
 END_DIMENSIONS
 $------------------------------------------------------------
 STRATEGY
@@ -16,15 +16,15 @@ STRATEGY
 END_STRATEGY
 $-------------------------------------------------------------
 GEOMETRY
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.geo.dat
+  INCLUDE  TS-CUTFEM-QUA04-COARSE.geo.dat
 END_GEOMETRY  
 $-------------------------------------------------------------
 SETS
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.set.dat  
+  INCLUDE  TS-CUTFEM-QUA04-COARSE.set.dat  
 END_SETS
 $-------------------------------------------------------------
 BOUNDARY_CONDITIONS
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.fix.dat  
+  INCLUDE  TS-CUTFEM-QUA04-COARSE.fix.dat  
 END_BOUNDARY_CONDITIONS
 $-------------------------------------------------------------
 FIELDS

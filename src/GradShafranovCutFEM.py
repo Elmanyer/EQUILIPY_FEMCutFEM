@@ -35,6 +35,7 @@ class GradShafranovCutFEM:
         self.ExteriorElems = None           # LIST OF CUT ELEMENT'S INDEXES LYING ON THE VACUUM VESSEL FIRST WALL EXTERIOR REGION
         self.NonCutElems = None             # LIST OF ALL NON CUT ELEMENTS
         self.CutElems = None                # LIST OF ALL CUT ELEMENTS
+        self.Elements = None                # ARRAY CONTAINING ALL ELEMENTS IN MESH (PYTHON OBJECTS)
         self.PlasmaBoundLevSet = None       # PLASMA REGION GEOMETRY LEVEL-SET FUNCTION NODAL VALUES
         self.VacVessWallLevSet = None       # VACUUM VESSEL FIRST WALL GEOMETRY LEVEL-SET FUNCTION NODAL VALUES
         self.PHI = None                     # PHI SOLUTION FIELD OBTAINED BY SOLVING CutFEM SYSTEM
@@ -85,6 +86,7 @@ class GradShafranovCutFEM:
         self.Nn = None                      # TOTAL NUMBER OF MESH NODES
         self.Ne = None                      # TOTAL NUMBER OF MESH ELEMENTS
         self.n = None                       # NUMBER OF NODES PER ELEMENT
+        self.numvertices = None             # NUMBER OF VERTICES PER ELEMENT (= 3 IF TRIANGULAR; = 4 IF QUADRILATERAL)
         self.nedge = None                   # NUMBER OF NODES ON ELEMENT EDGE
         self.dim = None                     # SPACE DIMENSION
         self.Tbound = None                  # MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
@@ -144,6 +146,10 @@ class GradShafranovCutFEM:
         print("     -> READ MESH DATA FILES...",end='')
         # NUMBER OF NODES PER ELEMENT
         self.n, self.nedge = ElementalNumberOfNodes(self.ElType, self.ElOrder)
+        if self.ElType == 1:
+            self.numvertices = 3
+        elif self.ElType == 2:
+            self.numvertices = 4
         
         # READ DOM FILE .dom.dat
         MeshDataFile = self.mesh_folder +'/'+ self.MESH +'.dom.dat'
@@ -747,9 +753,9 @@ class GradShafranovCutFEM:
             # COMPUTE PHI_B VALUE ON EACH VACUUM VESSEL ELEMENT FIRST WALL INTERFACE INTEGRATION POINTS
             for element in self.VacVessWallElems:
                 for edge in range(self.Elements[element].Neint):
-                    for point in range(self.Elements[element].Ng1D):
+                    for point in range(self.Elements[element].InterEdges[edge].Ngaussint):
                         # ISOLATE NODAL COORDINATES
-                        Xnode = self.Elements[element].Xgint[edge,point,:]
+                        Xnode = self.Elements[element].InterEdges[edge].Xgint[point,:]
         
                         # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
                         for icoil in range(self.Ncoils): 
@@ -804,11 +810,22 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def ClassifyElements(self):
-        """ Function that sperates the elements into 4 groups: 
+        """ Function that separates the elements into 5 groups: 
                 - PlasmaElems: elements inside the plasma region P(phi) where the plasma current is different from 0
                 - VacuumElems: elements outside the plasma region P(phi) where the plasma current is 0
                 - PlasmaBoundElems: ELEMENTS CONTAINING THE INTERFACE BETWEEN PLASMA AND VACUUM
-                - VacVessWallElems: ELEMENTS CONTAINING THE VACUUM VESSEL FIRST WALL """
+                - VacVessWallElems: ELEMENTS CONTAINING THE VACUUM VESSEL FIRST WALL 
+                - ExteriorElems: ELEMENTS WHICH ARE OUTSIDE OF THE VACUUM VESSEL FIRST WALL (NON-EXISTING IF FIRST WALL IS COMPUTATIONAL DOMAIN)
+                """
+                
+        """ FOR HIGH ORDER ELEMENTS (QUADRATIC, CUBIC...), ELEMENTS LYING ON GEOMETRY BOUNDARIES OR INTERFACES MAY BE CLASSIFIED AS SUCH DUE TO
+        THE LEVEL-SET SIGN ON NODES WHICH ARE NOT VERTICES OF THE ELEMENT ('HIGH ORDER' NODES). IN CASES WHERE ON SUCH NODES POSSES DIFFERENT SIGN, THIS MAY LEAD TO AN INTERFACE
+        WHICH CUTS TWICE THE SAME ELEMENTAL EDGE, MEANING THE INTERFACE ENTERS AND LEAVES THROUGH THE SAME SEGMENT. THE PROBLEM WITH THAT IS THE SUBROUTINE 
+        RESPONSIBLE FOR APPROXIMATING THE INTERFACE INSIDE ELEMENTS ONLY SEES THE LEVEL-SET VALUES ON THE VERTICES, BECAUSE IT DOES ONLY BOTHER ON WHETHER THE 
+        ELEMENTAL EDGE IS CUT OR NOT. 
+        IN LIGHT OF SUCH OCURRENCES, THE CLASSIFICATION OF ELEMENTS BASED ON LEVEL-SET SIGNS WILL BE IMPLEMENTED SUCH THAT ONLY THE VALUES ON THE VERTICES ARE
+        TAKEN INTO ACCOUNT. THAT WAY, THIS CASES ARE ELUDED. ON THE OTHER HAND, WE NEED TO DETECT ALSO SUCH CASES IN ORDER TO MODIFY THE VALUES OF THE MESH 
+        LEVEL-SET VALUES AND ALSO ON THE ELEMENTAL VALUES. """
         
         self.PlasmaElems = np.zeros([self.Ne], dtype=int)        # GLOBAL INDEXES OF ELEMENTS INSIDE PLASMA REGION
         self.VacuumElems = np.zeros([self.Ne], dtype=int)        # GLOBAL INDEXES OF ELEMENTS OUTSIDE PLASMA REGION (VACUUM REGION)
@@ -821,57 +838,77 @@ class GradShafranovCutFEM:
         kbound = 0
         kext = 0
         
-        def CheckElementalLevelSetSigns(LSe):
-            n = len(LSe) # NUMBER OF NODES IN ELEMENT
+        def CheckElementalVerticesLevelSetSigns(LSe):
             region = None
-            for i in range(n-1):
+            DiffHighOrderNodes = []
+            # CHECK SIGN OF LEVEL SET ON ELEMENTAL VERTICES
+            for i in range(self.numvertices-1):
+                # FIND ELEMENTS LYING ON THE INTERFACE (LEVEL-SET VERTICES VALUES EQUAL TO 0 OR WITH DIFFERENT SIGN)
                 if LSe[i] == 0:  # if node is on Level-Set 0 contour
                     region = 0
                     break
-                elif np.sign(LSe[i]) !=  np.sign(LSe[i+1]):  # if the sign between nodal values change -> INTERFACE ELEMENT
+                elif np.sign(LSe[i]) !=  np.sign(LSe[i+1]):  # if the sign between vertices values change -> INTERFACE ELEMENT
                     region = 0
                     break
+                # FIND ELEMENTS LYING INSIDE A SPECIFIC REGION (LEVEL-SET VERTICES VALUES WITH SAME SIGN)
                 else:
-                    if i+2 == self.n:   # if all nodal values have the same sign
-                        if np.sign(LSe[i+1]) > 0:   # all nodal values with positive sign -> EXTERIOR REGION ELEMENT
+                    if i+2 == self.numvertices:   # if all vertices values have the same sign
+                        # LOCATE ON WHICH REGION LIES THE ELEMENT
+                        if np.sign(LSe[i+1]) > 0:   # all vertices values with positive sign -> EXTERIOR REGION ELEMENT
                             region = +1
-                        else:   # all nodal values with negative sign -> INTERIOR REGION ELEMENT 
+                        else:   # all vertices values with negative sign -> INTERIOR REGION ELEMENT 
                             region = -1
-            return region
+                            
+                        # CHECK LEVEL-SET SIGN ON ELEMENTAL 'HIGH ORDER' NODES
+                        for i in range(self.numvertices,self.n-self.numvertices):  # LOOP OVER NODES WHICH ARE NOT ON VERTICES
+                            if np.sign(LSe[i]) != np.sign(LSe[0]):
+                                DiffHighOrderNodes.append(i)
+                
+            return region, DiffHighOrderNodes
             
-        for e in range(self.Ne):
-            regionplasma = CheckElementalLevelSetSigns(self.Elements[e].PlasmaLSe)    # check elemental nodal PLASMA INTERFACE level-set signs
-            regionvessel = CheckElementalLevelSetSigns(self.Elements[e].VacVessLSe)   # check elemental nodal VACUUM VESSEL FIRST WALL level-set signs
+        for ielem in range(self.Ne):
+            regionplasma, DHONplasma = CheckElementalVerticesLevelSetSigns(self.Elements[ielem].PlasmaLSe)    # check elemental vertices PLASMA INTERFACE level-set signs
+            regionvessel, DHONvessel = CheckElementalVerticesLevelSetSigns(self.Elements[ielem].VacVessLSe)   # check elemental vertices VACUUM VESSEL FIRST WALL level-set signs
             if regionplasma < 0:   # ALL PLASMA LEVEL-SET NODAL VALUES NEGATIVE -> PLASMA ELEMENT 
-                self.PlasmaElems[kplasm] = e
-                self.Elements[e].Dom = -1
+                self.PlasmaElems[kplasm] = ielem
+                self.Elements[ielem].Dom = -1
                 kplasm += 1
             elif regionplasma == 0:  # DIFFERENT SIGN IN PLASMA LEVEL-SET NODAL VALUES -> PLASMA/VACUUM INTERFACE ELEMENT
-                self.PlasmaBoundElems[kint] = e
-                self.Elements[e].Dom = 0
+                self.PlasmaBoundElems[kint] = ielem
+                self.Elements[ielem].Dom = 0
                 kint += 1
             elif regionplasma > 0: # ALL PLASMA LEVEL-SET NODAL VALUES POSITIVE -> VACUUM ELEMENT
                 if regionvessel < 0:  # ALL VACUUM VESSEL LEVEL-SET NODAL VALUES NEGATIVE -> REGION BETWEEN PLASMA/VACUUM INTERFACE AND FIRST WALL
-                    self.VacuumElems[kvacuu] = e
-                    self.Elements[e].Dom = +1
+                    self.VacuumElems[kvacuu] = ielem
+                    self.Elements[ielem].Dom = +1
                     kvacuu += 1
                 elif regionvessel == 0: # DIFFERENT SIGN IN VACUUM VESSEL LEVEL-SET NODAL VALUES -> FIRST WALL ELEMENT
-                    self.VacVessWallElems[kbound] = e
-                    self.Elements[e].Dom = +2
+                    self.VacVessWallElems[kbound] = ielem
+                    self.Elements[ielem].Dom = +2
                     kbound += 1
                 elif regionvessel > 0:  # ALL VACUUM VESSEL LEVEL-SET NODAL VALUES POSITIVE -> EXTERIOR ELEMENT
-                    self.ExteriorElems[kext] = e
-                    self.Elements[e].Dom = +3
+                    self.ExteriorElems[kext] = ielem
+                    self.Elements[ielem].Dom = +3
                     kext += 1
+                    
+            # IF THERE EXISTS 'HIGH-ORDER' NODES WITH DIFFERENT PLASMA LEVEL-SET SIGN
+            if DHONplasma:
+                for inode in DHONplasma:  # LOOP OVER LOCAL INDICES 
+                    self.Elements[ielem].PlasmaLSe[inode] *= -1 
+                    self.PlasmaBoundLevSet[self.Elements[ielem].Te[inode]] *= -1
+                     
+            # IF THERE EXISTS 'HIGH-ORDER' NODES WITH DIFFERENT VACUUM VESSEL LEVEL-SET SIGN
+            if DHONvessel:
+                for inode in DHONvessel:  # LOOP OVER LOCAL INDICES 
+                    self.Elements[ielem].VacVessLSe[inode] *= -1 
+                    self.VacVessWallLevSet[self.Elements[ielem].Te[inode]] *= -1
         
-        # DELETE REST OF UNUSED MEMORY
-        self.ExteriorElems = self.ExteriorElems[:kext]
-                            
         # DELETE REST OF UNUSED MEMORY
         self.PlasmaElems = self.PlasmaElems[:kplasm]
         self.VacuumElems = self.VacuumElems[:kvacuu]
         self.PlasmaBoundElems = self.PlasmaBoundElems[:kint]
         self.VacVessWallElems = self.VacVessWallElems[:kbound]
+        self.ExteriorElems = self.ExteriorElems[:kext]
         
         # GATHER NON-CUT ELEMENTS AND CUT ELEMENTS 
         if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
@@ -902,6 +939,32 @@ class GradShafranovCutFEM:
     ##################################################################################################
     ############################### SOLUTION NORMALISATION ###########################################
     ##################################################################################################
+    
+    # SEARCH ELEMENT CONTAINING POINT IN MESH
+    def SearchElement(self,X,searchelements):
+        # Function which finds the element among the elements list containing the point with coordinates X. 
+        
+        if self.ElType == 1: # FOR TRIANGULAR ELEMENTS
+            for elem in searchelements:
+                Xe = self.Elements[elem].Xe
+                # Calculate the cross products (c1, c2, c3) for the point relative to each edge of the triangle
+                c1 = (Xe[1,0]-Xe[0,0])*(X[1]-Xe[0,1])-(Xe[1,1]-Xe[0,1])*(X[0]-Xe[0,0])
+                c2 = (Xe[2,0]-Xe[1,0])*(X[1]-Xe[1,1])-(Xe[2,1]-Xe[1,1])*(X[0]-Xe[1,0])
+                c3 = (Xe[0,0]-Xe[2,0])*(X[1]-Xe[2,1])-(Xe[0,1]-Xe[2,1])*(X[0]-Xe[2,0])
+                if (c1 < 0 and c2 < 0 and c3 < 0) or (c1 > 0 and c2 > 0 and c3 > 0): # INSIDE TRIANGLE
+                    return elem
+        elif self.ElType == 2: # FOR QUADRILATERAL ELEMENTS
+            for elem in searchelements:
+                Xe = self.Elements[elem].Xe
+                # This algorithm counts how many times a ray starting from the point intersects the edges of the quadrilateral. 
+                # If the count is odd, the point is inside; otherwise, it is outside.
+                inside = False
+                for i in range(4):
+                    if ((Xe[i,1] > X[1]) != (Xe[(i+1)%4,1]>X[1])) and (X[0]<(Xe[(i+1)%4,0]-Xe[i,0])*(X[1]-Xe[i,1])/(Xe[(i+1)%4,1]-Xe[i,1])+Xe[i,0]):
+                        inside = not inside
+                if inside:
+                    return elem
+    
     
     def ComputeCriticalPHI(self,PHI):
         """ Function which computes the values of PHI at the:
@@ -942,18 +1005,6 @@ class GradShafranovCutFEM:
                 return "LOCAL EXTREMUM"
             else:
                 return "SADDLE POINT"
-            
-        # SEARCH ELEMENT CONTAINING POINT IN MESH
-        def SearchElement(Elements,X,searchelements):
-            # Function which finds the element among the elements list containing the point with coordinates X. 
-            for elem in searchelements:
-                Xe = Elements[elem].Xe
-                # Calculate the cross products (c1, c2, c3) for the point relative to each edge of the triangle
-                c1 = (Xe[1,0]-Xe[0,0])*(X[1]-Xe[0,1])-(Xe[1,1]-Xe[0,1])*(X[0]-Xe[0,0])
-                c2 = (Xe[2,0]-Xe[1,0])*(X[1]-Xe[1,1])-(Xe[2,1]-Xe[1,1])*(X[0]-Xe[1,0])
-                c3 = (Xe[0,0]-Xe[2,0])*(X[1]-Xe[2,1])-(Xe[0,1]-Xe[2,1])*(X[0]-Xe[2,0])
-                if (c1 < 0 and c2 < 0 and c3 < 0) or (c1 > 0 and c2 > 0 and c3 > 0): # INSIDE TRIANGLE
-                    return elem
             
         
         # 1. INTERPOLATE PHI VALUES ON A FINER STRUCTURED MESH USING PHI ON NODES
@@ -1040,52 +1091,52 @@ class GradShafranovCutFEM:
         
         # FIND SOLUTION OF  GRAD(PHI) = 0   NEAR MAGNETIC AXIS AND SADDLE POINT 
         if self.it == 1:
-            self.Xcrit = np.zeros([2,3])
+            self.Xcrit = np.zeros([2,2,3])  # [(iterations n, n+1), (extremum, saddle point), (R_crit,Z_crit,PHI_crit)]
             X0_extr = np.array([6,0])
             X0_saddle = np.array([5,-4])
         else:
-            X0_extr = self.Xcrit[0,:-1]
-            X0_saddle = self.Xcrit[1,:-1]
+            X0_extr = self.Xcrit[0,0,:-1]
+            X0_saddle = self.Xcrit[0,1,:-1]
             
         # 3. LOOK FOR LOCAL EXTREMUM
         sol = optimize.root(gradPHI, X0_extr, args=(Rfine,Zfine,gradPHIfine))
         if sol.success == True:
-            self.Xcrit[0,:-1] = sol.x
+            self.Xcrit[1,0,:-1] = sol.x
         else:
             raise Exception("LOCAL EXTREMUM NOT FOUND")
         # 4. CHECK HESSIAN LOCAL EXTREMUM
         # LOCAL EXTREMUM
-        nature = EvaluateHESSIAN(self.Xcrit[0,:-1], gradPHIfine, Rfine, Zfine, dr, dz)
+        nature = EvaluateHESSIAN(self.Xcrit[1,0,:-1], gradPHIfine, Rfine, Zfine, dr, dz)
         if nature != "LOCAL EXTREMUM":
             print("ERROR IN LOCAL EXTREMUM HESSIAN")
         # 5. INTERPOLATE VALUE OF PHI AT LOCAL EXTREMUM
         # LOOK FOR ELEMENT CONTAINING LOCAL EXTREMUM
-        elem = SearchElement(self.Elements,self.Xcrit[0,:-1],self.PlasmaElems)
-        self.Xcrit[0,-1] = elem
+        elem = self.SearchElement(self.Xcrit[1,0,:-1],self.PlasmaElems)
+        self.Xcrit[1,0,-1] = elem
         # INTERPOLATE PHI VALUE ON CRITICAL POINT
-        self.PHI_0 = self.Elements[elem].ElementalInterpolation(self.Xcrit[0,:-1],PHI[self.Elements[elem].Te]) 
-        print('LOCAL EXTREMUM AT ',self.Xcrit[0,:-1],' (ELEMENT ', elem,') WITH VALUE PHI_0 = ',self.PHI_0)
+        self.PHI_0 = self.Elements[elem].ElementalInterpolation(self.Xcrit[1,0,:-1],PHI[self.Elements[elem].Te]) 
+        print('LOCAL EXTREMUM AT ',self.Xcrit[1,0,:-1],' (ELEMENT ', elem,') WITH VALUE PHI_0 = ',self.PHI_0)
             
         if self.PLASMA_BOUNDARY == "FREE":
             # 3. LOOK FOR SADDLE POINT
             sol = optimize.root(gradPHI, X0_saddle, args=(Rfine,Zfine,gradPHIfine))
             if sol.success == True:
-                self.Xcrit[1,:-1] = sol.x
+                self.Xcrit[1,1,:-1] = sol.x
             else:
                 raise Exception("SADDLE POINT NOT FOUND")
             # 4. CHECK HESSIAN SADDLE POINT
-            nature = EvaluateHESSIAN(self.Xcrit[1,:-1], gradPHIfine, Rfine, Zfine, dr, dz)
+            nature = EvaluateHESSIAN(self.Xcrit[1,1,:-1], gradPHIfine, Rfine, Zfine, dr, dz)
             if nature != "SADDLE POINT":
                 print("ERROR IN SADDLE POINT HESSIAN")
             # 5. INTERPOLATE VALUE OF PHI AT SADDLE POINT
             # LOOK FOR ELEMENT CONTAINING SADDLE POINT
-            elem = SearchElement(self.Elements,self.Xcrit[1,:-1],np.concatenate((self.VacuumElems,self.PlasmaBoundElems,self.PlasmaElems),axis=0))
-            self.Xcrit[1,-1] = elem
+            elem = self.SearchElement(self.Xcrit[1,1,:-1],np.concatenate((self.VacuumElems,self.PlasmaBoundElems,self.PlasmaElems),axis=0))
+            self.Xcrit[1,1,-1] = elem
             # INTERPOLATE PHI VALUE ON CRITICAL POINT
-            self.PHI_X = self.Elements[elem].ElementalInterpolation(self.Xcrit[1,:-1],PHI[self.Elements[elem].Te]) 
-            print('SADDLE POINT AT ',self.Xcrit[1,:-1],' (ELEMENT ', elem,') WITH VALUE PHI_X = ',self.PHI_X)
+            self.PHI_X = self.Elements[elem].ElementalInterpolation(self.Xcrit[1,1,:-1],PHI[self.Elements[elem].Te]) 
+            print('SADDLE POINT AT ',self.Xcrit[1,1,:-1],' (ELEMENT ', elem,') WITH VALUE PHI_X = ',self.PHI_X)
         else:
-            self.Xcrit[1,:-1] = [self.Xmin,self.Ymin]
+            self.Xcrit[1,1,:-1] = [self.Xmin,self.Ymin]
             self.PHI_X = 0
             
         return 
@@ -1199,6 +1250,9 @@ class GradShafranovCutFEM:
                 self.converg_INT = True   # STOP INTERNAL WHILE LOOP 
             else:
                 self.converg_INT = False
+                
+            print("Internal iteration = ",self.it_INT,", PHI_NORM residu = ", L2residu)
+            print(" ")
             
         elif VALUES == "PHI_B":
             # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
@@ -1210,12 +1264,16 @@ class GradShafranovCutFEM:
                 self.converg_EXT = True   # STOP EXTERNAL WHILE LOOP 
             else:
                 self.converg_EXT = False
+                
+            print("External iteration = ",self.it_EXT,", PHI_B residu = ", L2residu)
+            print(" ")
         return 
     
     def UpdatePHI(self,VALUES):
         
         if VALUES == 'PHI_NORM':
             self.PHI_NORM[:,0] = self.PHI_NORM[:,1]
+            self.Xcrit[0,:,:] = self.Xcrit[1,:,:]
             
             """if self.converg_INT == False:
                 self.PHI_NORM[:,0] = self.PHI_NORM[:,1]
@@ -1242,26 +1300,28 @@ class GradShafranovCutFEM:
         
         if INTERFACE == 'PLASMA/VACUUM':
             for elem in self.PlasmaBoundElems:
-                ELEMENT = self.Elements[elem]
-                # COMPUTE INTERFACE CONDITIONS PHI_D
-                ELEMENT.PHI_g = np.zeros([ELEMENT.Neint,ELEMENT.Ng1D])
                 # FOR EACH PLASMA/VACUUM INTERFACE EDGE
-                for edge in range(ELEMENT.Neint):
+                for edge in range(self.Elements[elem].Neint):
+                    # ISOLATE ELEMENTAL EDGE
+                    EDGE = self.Elements[elem].InterEdges[edge]
+                    # COMPUTE INTERFACE CONDITIONS PHI_D
+                    EDGE.PHI_g = np.zeros([EDGE.Ngaussint])
                     # FOR EACH INTEGRATION POINT ON THE PLASMA/VACUUM INTERFACE EDGE
-                    for point in range(ELEMENT.Ng1D):
+                    for point in range(EDGE.Ngaussint):
                         if self.PLASMA_CURRENT == 'LINEAR':
-                            ELEMENT.PHI_g[edge,point] = self.AnalyticalSolutionLINEAR(ELEMENT.Xgint[edge,point,:])
+                            EDGE.PHI_g[point] = self.AnalyticalSolutionLINEAR(EDGE.Xgint[point,:])
                         elif self.PLASMA_CURRENT == 'NONLINEAR':
-                            ELEMENT.PHI_g[edge,point] = self.AnalyticalSolutionNONLINEAR(ELEMENT.Xgint[edge,point,:])
+                            EDGE.PHI_g[point] = self.AnalyticalSolutionNONLINEAR(EDGE.Xgint[point,:])
                         elif self.PLASMA_CURRENT == 'PROFILES':
-                            ELEMENT.PHI_g[edge,point] = self.PHI_X
+                            EDGE.PHI_g[point] = self.PHI_X
                             #ELEMENT.PHI_g[edge,point] = 0
                 
         elif INTERFACE == "FIRST WALL":
             # FOR FIXED PLASMA BOUNDARY, THE VACUUM VESSEL BOUNDARY PHI_B = 0, THUS SO ARE ALL ELEMENTAL VALUES  ->> PHI_Be = 0
             if self.PLASMA_BOUNDARY == 'FIXED':  
                 for elem in self.VacVessWallElems:
-                    self.Elements[elem].PHI_g = np.zeros([self.Elements[elem].Neint,self.Elements[elem].Ng1D])
+                    for edge in range(self.Elements[elem].Neint):
+                        self.Elements[elem].InterEdges[edge].PHI_g = np.zeros([self.Elements[elem].InterEdges[edge].Ngaussint])
             
             # FOR FREE PLASMA BOUNDARY, THE VACUUM VESSEL BOUNDARY PHI_B VALUES ARE COMPUTED FROM THE GRAD-SHAFRANOV OPERATOR'S GREEN FUNCTION
             # IN ROUTINE COMPUTEPHI_B, HERE WE NEED TO SEND TO EACH BOUNDARY ELEMENT THE PHI_B VALUES OF THEIR CORRESPONDING BOUNDARY NODES
@@ -1269,12 +1329,13 @@ class GradShafranovCutFEM:
                 k = 0
                 # FOR EACH ELEMENT CONTAINING THE VACUUM VESSEL FIRST WALL
                 for elem in self.VacVessWallElems:
-                    ELEMENT = self.Elements[elem]
                     # FOR EACH FIRST WALL EDGE
-                    for edge in range(ELEMENT.Neint):
+                    for edge in range(self.Elements[elem].Neint):
+                        # ISOLATE EDGE
+                        EDGE = self.Elements[elem].InterEdges[edge]
                         # FOR EACH INTEGRATION POINT ON THE FIRST WALL EDGE
-                        for point in range(ELEMENT.Ng1D):
-                            ELEMENT.PHI_g[edge,point] = self.PHI_B[k,0]
+                        for point in range(EDGE.Ngaussint):
+                            EDGE.PHI_g[point] = self.PHI_B[k,0]
                             k += 1
         return
     
@@ -1296,7 +1357,7 @@ class GradShafranovCutFEM:
                 PHI0[i] = self.AnalyticalSolutionNONLINEAR(self.X[i,:])*2*random()
         else:
             for i in range(self.Nn):
-                PHI0[i] = self.AnalyticalSolutionLINEAR(self.X[i,:])*0.5
+                PHI0[i] = self.AnalyticalSolutionLINEAR(self.X[i,:])*(-0.5)
         return PHI0
     
     def InitialiseLevelSets(self):
@@ -1362,12 +1423,14 @@ class GradShafranovCutFEM:
         # NODES ON VACUUM VESSEL FIRST WALL GEOMETRY FOR WHICH TO EVALUATE PHI_B VALUES == GAUSS INTEGRATION NODES ON FIRST WALL EDGES
         self.NnFW = 0
         for elem in self.VacVessWallElems:
-            self.NnFW += self.Elements[elem].Neint*self.Elements[elem].Ng1D
+            for edge in range(self.Elements[elem].Neint):
+                self.NnFW += self.Elements[elem].InterEdges[edge].Ngaussint
         # INITIALISE PHI_B VECTOR
         self.PHI_B = np.zeros([self.NnFW,2])      # VACUUM VESSEL FIRST WALL PHI VALUES (EXTERNAL LOOP) AT ITERATIONS N AND N+1 (COLUMN 0 -> ITERATION N ; COLUMN 1 -> ITERATION N+1)
         # FOR VACUUM VESSEL FIRST WALL ELEMENTS, INITIALISE ELEMENTAL ATTRIBUTE PHI_Bg (PHI VALUES ON VACUUM VESSEL FIRST WALL INTERFACE EDGES GAUSS INTEGRATION POINTS)
         for elem in self.VacVessWallElems:
-            self.Elements[elem].PHI_g = np.zeros([self.Elements[elem].Neint,self.Elements[elem].Ng1D])   
+            for edge in range(self.Elements[elem].Neint):
+                self.Elements[elem].InterEdges[edge].PHI_g = np.zeros([self.Elements[elem].InterEdges[edge].Ngaussint])   
             
         # COMPUTE INITIAL VACUUM VESSEL FIRST WALL VALUES PHI_B 
         print('         -> COMPUTE INITIAL VACUUM VESSEL FIRST WALL VALUES PHI_B...', end="")
@@ -1425,13 +1488,13 @@ class GradShafranovCutFEM:
             for elem in self.VacVessWallElems:
                 # IDENTIFY COMPUTATIONAL DOMAIN'S BOUNDARIES CONFORMING VACUUM VESSEL FIRST WALL
                 self.Elements[elem].ComputationalDomainBoundaryEdges(self.Tbound)  
-                # COMPUTE NORMAL VECTOR
+                # COMPUTE OUTWARDS NORMAL VECTOR
                 self.Elements[elem].ComputationalDomainBoundaryNormal(self.Xmax,self.Xmin,self.Ymax,self.Ymin)
         else:
-            for elem in self.VacVessWallElems:
+            for inter, elem in enumerate(self.VacVessWallElems):
                 # APPROXIMATE VACUUM VESSEL FIRST WALL GEOMETRY CUTTING ELEMENT 
-                self.Elements[elem].InterfaceLinearApproximation()  
-                # COMPUTE NORMAL VECTOR
+                self.Elements[elem].InterfaceLinearApproximation(inter)  
+                # COMPUTE OUTWARDS NORMAL VECTOR
                 self.Elements[elem].InterfaceNormal()
         # CHECK NORMAL VECTORS ORTHOGONALITY RESPECT TO INTERFACE EDGES
         self.CheckInterfaceNormalVectors("FIRST WALL")  
@@ -1440,8 +1503,9 @@ class GradShafranovCutFEM:
     def ComputePlasmaInterfaceApproximation(self):
         """ Compute the coordinates for the points describing the interface linear approximation. """
         for inter, elem in enumerate(self.PlasmaBoundElems):
-            self.Elements[elem].InterfaceLinearApproximation()
-            self.Elements[elem].interface = inter
+            # APPROXIMATE PLASMA/VACUUM INTERACE GEOMETRY CUTTING ELEMENT 
+            self.Elements[elem].InterfaceLinearApproximation(inter)
+            # COMPUTE OUTWARDS NORMAL VECTOR
             self.Elements[elem].InterfaceNormal()
         self.CheckInterfaceNormalVectors("PLASMA BOUNDARY")
         return
@@ -1454,8 +1518,10 @@ class GradShafranovCutFEM:
             
         for elem in elements:
             for edge in range(self.Elements[elem].Neint):
-                dir = np.array([self.Elements[elem].Xeint[edge,1,0]-self.Elements[elem].Xeint[edge,0,0], self.Elements[elem].Xeint[edge,1,1]-self.Elements[elem].Xeint[edge,0,1]]) 
-                scalarprod = np.dot(dir,self.Elements[elem].NormalVec[edge,:])
+                # ISOLATE INTERFACE SEGMENT/EDGE
+                EDGE = self.Elements[elem].InterEdges[edge]
+                dir = np.array([EDGE.Xeint[1,0]-EDGE.Xeint[0,0], EDGE.Xeint[1,1]-EDGE.Xeint[0,1]]) 
+                scalarprod = np.dot(dir,EDGE.NormalVec)
                 if scalarprod > 1e-10: 
                     raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
         return
@@ -1496,25 +1562,17 @@ class GradShafranovCutFEM:
                 - VACUUM ELEMENTS. """
                 
         if self.PLASMA_BOUNDARY == "FREE":
-            # IN CASE WHERE THE NEW SADDLE POINT (N+1) CORRESPONDS (CLOSE TO) TO THE LOWEST POINT OF THE OLD PLASMA REGION (N), THEN THAT MEANS THAT THE PLASMA REGION
+            # IN CASE WHERE THE NEW SADDLE POINT (N+1) CORRESPONDS (CLOSE TO) TO THE OLD SADDLE POINT, THEN THAT MEANS THAT THE PLASMA REGION
             # IS ALREADY WELL DEFINED BY THE OLD LEVEL-SET 
             
-            # LOOK FOR LOWEST ELEMENT IN MESH CONTAINING THE INTERFACE PLASMA/VACUUM
-            lowest_elem = 0
-            for elem in self.PlasmaBoundElems:
-                if lowest_elem == 0 or np.sum(self.Elements[elem].Xe[:,1])/self.Elements[elem].n < np.sum(self.Elements[lowest_elem].Xe[:,1])/self.Elements[elem].n:
-                    lowest_elem = elem
-                
-            Xcenter_lowest_elem = np.array([np.sum(self.Elements[lowest_elem].Xe[:,0])/self.Elements[elem].n,np.sum(self.Elements[lowest_elem].Xe[:,1])/self.Elements[elem].n])
-                
-            if np.linalg.norm(Xcenter_lowest_elem-self.Xcrit[1,:-1]) < 0.5:
+            if np.linalg.norm(self.Xcrit[1,1,:-1]-self.Xcrit[0,1,:-1]) < 0.5:
                 return
             
             else:
                 ###### UPDATE PLASMA REGION LEVEL-SET FUNCTION VALUES ACCORDING TO SOLUTION OBTAINED
                 # RECALL THAT PLASMA REGION IS DEFINED BY NEGATIVE VALUES OF LEVEL-SET
                 for i in range(self.Nn):  
-                    if self.X[i,0] < 3 or self.X[i,1] < self.Xcrit[1,1]:
+                    if self.X[i,0] < 3 or self.X[i,1] < self.Xcrit[1,1,1]:
                         self.PlasmaBoundLevSet[i] = np.abs(self.PHI_NORM[i,1])
                     else:
                         self.PlasmaBoundLevSet[i] = -self.PHI_NORM[i,1]
@@ -1594,7 +1652,7 @@ class GradShafranovCutFEM:
             # ISOLATE ELEMENT 
             ELEMENT = self.Elements[elem]
             # COMPUTE ELEMENTAL MATRICES
-            ELEMENT.IntegrateElementalInterfaceTerms(ELEMENT.PHI_g,self.beta,self.LHS,self.RHS)
+            ELEMENT.IntegrateElementalInterfaceTerms(self.beta,self.LHS,self.RHS)
         
         # IN THE CASE WHERE THE VACUUM VESSEL FIRST WALL CORRESPONDS TO THE COMPUTATIONAL DOMAIN'S BOUNDARY, ELEMENTS CONTAINING THE FIRST WALL ARE NOT CUT ELEMENTS 
         # BUT STILL WE NEED TO INTEGRATE ALONG THE COMPUTATIONAL DOMAIN'S BOUNDARY BOUNDARY 
@@ -1603,7 +1661,7 @@ class GradShafranovCutFEM:
                 # ISOLATE ELEMENT 
                 ELEMENT = self.Elements[elem]
                 # COMPUTE ELEMENTAL MATRICES
-                ELEMENT.IntegrateElementalInterfaceTerms(ELEMENT.PHI_g,self.beta,self.LHS,self.RHS)
+                ELEMENT.IntegrateElementalInterfaceTerms(self.beta,self.LHS,self.RHS)
         print("Done!") 
         
         return
@@ -1617,9 +1675,9 @@ class GradShafranovCutFEM:
         self.PHI_NORM_ALL[:,self.it] = self.PHI_NORM[:,0]   
         if self.it > 0:
             self.PHI_crit_ALL[0,0,self.it] = self.PHI_0
-            self.PHI_crit_ALL[0,1:,self.it] = self.Xcrit[0,:-1]
+            self.PHI_crit_ALL[0,1:,self.it] = self.Xcrit[1,0,:-1]
             self.PHI_crit_ALL[1,0,self.it] = self.PHI_X
-            self.PHI_crit_ALL[1,1:,self.it] = self.Xcrit[1,:-1]
+            self.PHI_crit_ALL[1,1:,self.it] = self.Xcrit[1,1,:-1]
         return
     
     def StoreMeshConfiguration(self):
@@ -1665,7 +1723,7 @@ class GradShafranovCutFEM:
                 self.StoreMeshConfiguration()
                 print('OUTER ITERATION = '+str(self.it_EXT)+' , INNER ITERATION = '+str(self.it_INT))
                 ##################################
-                #self.PlotClassifiedElements_2()
+                self.PlotClassifiedElements_2()
                 # COMPUTE TOTAL PLASMA CURRENT CORRECTION FACTOR
                 if self.PLASMA_CURRENT == "PROFILES":
                     #self.ComputeTotalPlasmaCurrentNormalization()
@@ -1694,10 +1752,10 @@ class GradShafranovCutFEM:
             print("Normalised total plasma current = ", Tcurrent*self.gamma)
             print('COMPUTE VACUUM VESSEL FIRST WALL VALUES PHI_B...', end="")
             self.PHI_B[:,1] = self.ComputePHI_B()     # COMPUTE VACUUM VESSEL FIRST WALL VALUES PHI_B WITH INTERNALLY CONVERGED PHI_NORM
+            print('Done!')
             self.CheckConvergence('PHI_B')            # CHECK CONVERGENCE OF VACUUM VESSEL FIEST WALL PHI VALUES  (PHI_B)
             self.UpdatePHI('PHI_B')                   # UPDATE PHI_NORM AND PHI_B VALUES
-            self.UpdateElementalPHI_g("FIRST WALL")   # UPDATE ELEMENTAL CONSTRAINT VALUES PHI_g FOR VACUUM VESSEL FIRST WALL INTERFACE
-            print('Done!') 
+            self.UpdateElementalPHI_g("FIRST WALL")   # UPDATE ELEMENTAL CONSTRAINT VALUES PHI_g FOR VACUUM VESSEL FIRST WALL INTERFACE 
             #****************************************
         print('SOLUTION CONVERGED')
         #self.PlotSolution(self.PHI_CONV)
@@ -1777,21 +1835,75 @@ class GradShafranovCutFEM:
         ## PLOT LOCATION OF CRITICAL POINTS
         for i in range(2):
             # LOCAL EXTREMUM
-            axs[i].scatter(self.Xcrit[0,0],self.Xcrit[0,1],marker = 'x',color='red', s = 40, linewidths = 2)
+            axs[i].scatter(self.Xcrit[1,0,0],self.Xcrit[1,0,1],marker = 'x',color='red', s = 40, linewidths = 2)
             # SADDLE POINT
-            axs[i].scatter(self.Xcrit[1,0],self.Xcrit[1,1],marker = 'x',color='green', s = 40, linewidths = 2)
+            axs[i].scatter(self.Xcrit[1,1,0],self.Xcrit[1,1,1],marker = 'x',color='green', s = 40, linewidths = 2)
         
         ## PLOT ELEMENTS CONTAINING CRITICAL POINTS
         # LOCAL EXTREMUM
-        ELEMENT = self.Elements[int(self.Xcrit[0,-1])]
+        ELEMENT = self.Elements[int(self.Xcrit[1,0,-1])]
         for j in range(ELEMENT.n):
             axs[0].plot([ELEMENT.Xe[j,0], ELEMENT.Xe[int((j+1)%ELEMENT.n),0]],[ELEMENT.Xe[j,1], ELEMENT.Xe[int((j+1)%ELEMENT.n),1]], color='red', linewidth=1) 
         # SADDLE POINT
-        ELEMENT = self.Elements[int(self.Xcrit[1,-1])]
+        ELEMENT = self.Elements[int(self.Xcrit[1,1,-1])]
         for j in range(ELEMENT.n):
             axs[0].plot([ELEMENT.Xe[j,0], ELEMENT.Xe[int((j+1)%ELEMENT.n),0]],[ELEMENT.Xe[j,1], ELEMENT.Xe[int((j+1)%ELEMENT.n),1]], color='green', linewidth=1) 
         
         plt.show()
+        return
+    
+    
+    def InspectElement(self,element_index,INTERFACE,QUADRATURE):
+        
+        ELEM = self.Elements[element_index]
+        Xmin = np.min(ELEM.Xe[:,0])-0.1
+        Xmax = np.max(ELEM.Xe[:,0])+0.1
+        Ymin = np.min(ELEM.Xe[:,1])-0.1
+        Ymax = np.max(ELEM.Xe[:,1])+0.1
+        if ELEM.ElType == 1:
+            numedges = 3
+        elif ELEM.ElType == 2:
+            numedges = 4
+            
+        if ELEM.Dom == -1:
+            color = 'red'
+        elif ELEM.Dom == 0:
+            color = 'gold'
+        elif ELEM.Dom == 1:
+            color = 'grey'
+        elif ELEM.Dom == 2:
+            color = 'cyan'
+        elif ELEM.Dom == 3:
+            color = 'black'
+        
+        fig, axs = plt.subplots(1, 2, figsize=(10,6))
+        axs[0].set_xlim(self.Xmin-0.25,self.Xmax+0.25)
+        axs[0].set_ylim(self.Ymin-0.25,self.Ymax+0.25)
+        axs[0].tricontourf(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=30, cmap='plasma')
+        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=[0], colors = 'black')
+        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        for iedge in range(numedges):
+            axs[0].plot([ELEM.Xe[iedge,0],ELEM.Xe[int((iedge+1)%ELEM.numedges),0]],[ELEM.Xe[iedge,1],ELEM.Xe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=3)
+        
+        axs[1].set_xlim(Xmin,Xmax)
+        axs[1].set_ylim(Ymin,Ymax)
+        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        for iedge in range(ELEM.numedges):
+            axs[1].plot([ELEM.Xe[iedge,0],ELEM.Xe[int((iedge+1)%ELEM.numedges),0]],[ELEM.Xe[iedge,1],ELEM.Xe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=3)
+        axs[1].scatter(ELEM.Xe[:,0],ELEM.Xe[:,1], marker='o', s=50)
+        if INTERFACE:
+            axs[1].scatter(ELEM.InterEdges[0].Xeint[:,0],ELEM.InterEdges[0].Xeint[:,1],marker='x',s=50)
+        if QUADRATURE:
+            if ELEM.Dom == -1 or ELEM.Dom == 1 or ELEM.Dom == 3:
+                # PLOT QUADRATURE INTEGRATION POINTS
+                axs[1].scatter(ELEM.Xg2D[:,0],ELEM.Xg2D[:,1],marker='x',c='black')
+            else:
+                for SUBELEM in ELEM.SubElements:
+                    # PLOT SUBELEMENT EDGES
+                    for i in range(numedges):
+                        plt.plot([SUBELEM.Xe[i,0], SUBELEM.Xe[(i+1)%SUBELEM.n,0]], [SUBELEM.Xe[i,1], SUBELEM.Xe[(i+1)%SUBELEM.n,1]], color='black', linewidth=1)
+                    # PLOT QUADRATURE INTEGRATION POINTS
+                    plt.scatter(SUBELEM.Xg2D[:,0],SUBELEM.Xg2D[:,1],marker='x',c='grey')
         return
     
     
@@ -1859,40 +1971,40 @@ class GradShafranovCutFEM:
         # PLOT PLASMA REGION ELEMENTS
         for elem in self.PlasmaElems:
             ELEMENT = self.Elements[elem]
-            Xe = np.zeros([ELEMENT.n+1,2])
-            Xe[:-1,:] = ELEMENT.Xe
+            Xe = np.zeros([ELEMENT.numvertices+1,2])
+            Xe[:-1,:] = ELEMENT.Xe[:self.numvertices,:]
             Xe[-1,:] = ELEMENT.Xe[0,:]
             plt.plot(Xe[:,0], Xe[:,1], color='black', linewidth=1)
             plt.fill(Xe[:,0], Xe[:,1], color = 'red')
         # PLOT VACCUM ELEMENTS
         for elem in self.VacuumElems:
             ELEMENT = self.Elements[elem]
-            Xe = np.zeros([ELEMENT.n+1,2])
-            Xe[:-1,:] = ELEMENT.Xe
+            Xe = np.zeros([ELEMENT.numvertices+1,2])
+            Xe[:-1,:] = ELEMENT.Xe[:self.numvertices,:]
             Xe[-1,:] = ELEMENT.Xe[0,:]
             plt.plot(Xe[:,0], Xe[:,1], color='black', linewidth=1)
             plt.fill(Xe[:,0], Xe[:,1], color = 'gray')
         # PLOT EXTERIOR ELEMENTS IF EXISTING
         for elem in self.ExteriorElems:
             ELEMENT = self.Elements[elem]
-            Xe = np.zeros([ELEMENT.n+1,2])
-            Xe[:-1,:] = ELEMENT.Xe
+            Xe = np.zeros([ELEMENT.numvertices+1,2])
+            Xe[:-1,:] = ELEMENT.Xe[:self.numvertices,:]
             Xe[-1,:] = ELEMENT.Xe[0,:]
             plt.plot(Xe[:,0], Xe[:,1], color='black', linewidth=1)
             plt.fill(Xe[:,0], Xe[:,1], color = 'black')
         # PLOT PLASMA/VACUUM INTERFACE ELEMENTS
         for elem in self.PlasmaBoundElems:
             ELEMENT = self.Elements[elem]
-            Xe = np.zeros([ELEMENT.n+1,2])
-            Xe[:-1,:] = ELEMENT.Xe
+            Xe = np.zeros([ELEMENT.numvertices+1,2])
+            Xe[:-1,:] = ELEMENT.Xe[:self.numvertices,:]
             Xe[-1,:] = ELEMENT.Xe[0,:]
             plt.plot(Xe[:,0], Xe[:,1], color='black', linewidth=1)
             plt.fill(Xe[:,0], Xe[:,1], color = 'gold')
         # PLOT VACUUM VESSEL FIRST WALL ELEMENTS
         for elem in self.VacVessWallElems:
             ELEMENT = self.Elements[elem]
-            Xe = np.zeros([ELEMENT.n+1,2])
-            Xe[:-1,:] = ELEMENT.Xe
+            Xe = np.zeros([ELEMENT.numvertices+1,2])
+            Xe[:-1,:] = ELEMENT.Xe[:self.numvertices,:]
             Xe[-1,:] = ELEMENT.Xe[0,:]
             plt.plot(Xe[:,0], Xe[:,1], color='black', linewidth=1)
             plt.fill(Xe[:,0], Xe[:,1], color = 'cyan')
@@ -1932,11 +2044,13 @@ class GradShafranovCutFEM:
                         plt.plot([self.Elements[elem].Xe[j,0], self.Elements[elem].Xe[int((j+1)%self.Elements[elem].n),0]], 
                                 [self.Elements[elem].Xe[j,1], self.Elements[elem].Xe[int((j+1)%self.Elements[elem].n),1]], color='k', linewidth=1)
                 for edge in range(self.Elements[elem].Neint):
+                    # ISOLATE EDGE
+                    EDGE = self.Elements[elem].InterEdges[edge]
                     # PLOT INTERFACE APPROXIMATIONS
-                    axs[0].plot(self.Elements[elem].Xeint[edge,:,0],self.Elements[elem].Xeint[edge,:,1], linestyle='-',color = 'red', linewidth = 2)
-                    axs[1].plot(self.Elements[elem].Xeint[edge,:,0],self.Elements[elem].Xeint[edge,:,1], linestyle='-',marker='o',color = 'red', linewidth = 2)
+                    axs[0].plot(EDGE.Xeint[:,0],EDGE.Xeint[:,1], linestyle='-',color = 'red', linewidth = 2)
+                    axs[1].plot(EDGE.Xeint[:,0],EDGE.Xeint[:,1], linestyle='-',marker='o',color = 'red', linewidth = 2)
                     # PLOT NORMAL VECTORS
-                    Xeintmean = np.array([np.mean(self.Elements[elem].Xeint[edge,:,0]),np.mean(self.Elements[elem].Xeint[edge,:,1])])
+                    Xeintmean = np.array([np.mean(EDGE.Xeint[:,0]),np.mean(EDGE.Xeint[:,1])])
                     axs[i].arrow(Xeintmean[0],Xeintmean[1],self.Elements[elem].NormalVec[edge,0]/dl,self.Elements[elem].NormalVec[edge,1]/dl,width=0.01)
                 
         axs[1].set_aspect('equal')
@@ -2063,9 +2177,9 @@ class GradShafranovCutFEM:
             # PLOT INTERFACE LINEAR APPROXIMATION AND INTEGRATION POINTS
             for edge in range(ELEMENT.Neint):
                 # PLOT INTERFACE LINEAR APPROXIMATION
-                plt.plot(ELEMENT.Xeint[edge,:,0], ELEMENT.Xeint[edge,:,1], color='green', linewidth=1)
+                plt.plot(ELEMENT.InterEdges[edge].Xeint[:,0], ELEMENT.InterEdges[edge].Xeint[:,1], color='green', linewidth=1)
                 # PLOT INTERFACE QUADRATURE
-                plt.scatter(ELEMENT.Xgint[edge,:,0],ELEMENT.Xgint[edge,:,1],marker='o',c='green')
+                plt.scatter(ELEMENT.InterEdges[edge].Xgint[:,0],ELEMENT.InterEdges[edge].Xgint[:,1],marker='o',c='green')
                 
         # PLOT VACUUM VESSEL FIRST WALL ELEMENTS
         for elem in self.VacVessWallElems:
@@ -2086,9 +2200,9 @@ class GradShafranovCutFEM:
             # PLOT INTERFACE LINEAR APPROXIMATION AND INTEGRATION POINTS
             for edge in range(ELEMENT.Neint):
                 # PLOT INTERFACE LINEAR APPROXIMATION
-                plt.plot(ELEMENT.Xeint[edge,:,0], ELEMENT.Xeint[edge,:,1], color='orange', linewidth=1)
+                plt.plot(ELEMENT.InterEdges[edge].Xeint[:,0], ELEMENT.InterEdges[edge].Xeint[:,1], color='orange', linewidth=1)
                 # PLOT INTERFACE QUADRATURE
-                plt.scatter(ELEMENT.Xgint[edge,:,0],ELEMENT.Xgint[edge,:,1],marker='o',c='orange')
+                plt.scatter(ELEMENT.InterEdges[edge].Xgint[:,0],ELEMENT.InterEdges[edge].Xgint[:,1],marker='o',c='orange')
 
         plt.show()
         return

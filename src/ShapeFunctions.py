@@ -157,7 +157,7 @@ def ShapeFunctionsReference(X, elemType, elemOrder, node):
                             dNdxi = -xi*eta*(eta-1)
                             dNdeta = (1-xi**2)*(eta-1/2)
                         case 6:
-                            N = xi*(xi+1)*(1-eta^2)/2
+                            N = xi*(xi+1)*(1-eta**2)/2
                             dNdxi = (xi+1/2)*(1-eta**2)
                             dNdeta = xi*(xi+1)*(-eta)
                         case 7:

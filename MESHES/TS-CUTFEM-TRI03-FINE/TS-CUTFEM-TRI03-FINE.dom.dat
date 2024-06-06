@@ -16,15 +16,15 @@ STRATEGY
 END_STRATEGY
 $-------------------------------------------------------------
 GEOMETRY
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.geo.dat
+  INCLUDE  TS-CUTFEM-TRI03-FINE.geo.dat
 END_GEOMETRY  
 $-------------------------------------------------------------
 SETS
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.set.dat  
+  INCLUDE  TS-CUTFEM-TRI03-FINE.set.dat  
 END_SETS
 $-------------------------------------------------------------
 BOUNDARY_CONDITIONS
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.fix.dat  
+  INCLUDE  TS-CUTFEM-TRI03-FINE.fix.dat  
 END_BOUNDARY_CONDITIONS
 $-------------------------------------------------------------
 FIELDS

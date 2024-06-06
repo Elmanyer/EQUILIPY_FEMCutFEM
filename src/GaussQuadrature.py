@@ -49,7 +49,7 @@ def GaussQuadrature(element,order):
                         wg = np.array([25/96, 25/96, 25/96, -27/96])
             case 2:  # QUADRILATERAL
                 match order:
-                    case 3:
+                    case 1:
                         Ng = 4
                         zg = np.zeros([Ng,2])
                         sq = 1/np.sqrt(3)
@@ -58,7 +58,7 @@ def GaussQuadrature(element,order):
                         zg[2,:] = [sq, sq]
                         zg[2,:] = [-sq, sq]
                         wg = np.ones(Ng)
-                    case 5:  
+                    case 2:  
                         Ng = 9
                         zg = np.array([[0.774596669241483, 0.774596669241483],
                                         [0, 0.774596669241483],

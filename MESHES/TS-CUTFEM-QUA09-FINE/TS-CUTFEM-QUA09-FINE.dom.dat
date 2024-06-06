@@ -1,9 +1,9 @@
 $------------------------------------------------------------
 DIMENSIONS
-  NODAL_POINTS=         1828
-  ELEMENTS=             3494
+  NODAL_POINTS=         6461
+  ELEMENTS=             1575
   SPACE_DIMENSIONS=        2
-  TYPES_OF_ELEMENTS=      10,      0,      0,      0,      0
+  TYPES_OF_ELEMENTS=       0,      0,      0,      0,     14
   BOUNDARIES=            160
 END_DIMENSIONS
 $------------------------------------------------------------
@@ -16,15 +16,15 @@ STRATEGY
 END_STRATEGY
 $-------------------------------------------------------------
 GEOMETRY
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.geo.dat
+  INCLUDE  TS-CUTFEM-QUA09-FINE.geo.dat
 END_GEOMETRY  
 $-------------------------------------------------------------
 SETS
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.set.dat  
+  INCLUDE  TS-CUTFEM-QUA09-FINE.set.dat  
 END_SETS
 $-------------------------------------------------------------
 BOUNDARY_CONDITIONS
-  INCLUDE  TS-UNSTRUCTURED_FINE_EXTENDED.fix.dat  
+  INCLUDE  TS-CUTFEM-QUA09-FINE.fix.dat  
 END_BOUNDARY_CONDITIONS
 $-------------------------------------------------------------
 FIELDS
