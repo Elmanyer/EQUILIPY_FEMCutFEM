@@ -237,16 +237,12 @@ class Element:
     ##################################################################################################
     
     @staticmethod
-    def CheckNodeOnEdge(x,ElType,Xe,TOL):
+    def CheckNodeOnEdge(x,numvertices,Xe,TOL):
         """ Function which checks if point with coordinates x is on any edge of the element with nodal coordinates Xe. """
-        if ElType == 1:  # TRIANGULAR ELEMENT
-            vertices = 3
-        elif ElType == 2:  # QUADRILATERAL ELEMENT
-            vertices = 4
         edgecheck = False
-        for vertexnode in range(vertices):
+        for vertexnode in range(numvertices):
             i = vertexnode
-            j = (vertexnode+1)%vertices
+            j = (vertexnode+1)%numvertices
             if abs(Xe[j,0]-Xe[i,0]) < 1e-6:  # infinite slope <=> vertical edge
                 if abs(Xe[i,0]-x[0]) < TOL:
                     edgecheck = True
@@ -430,7 +426,7 @@ class Element:
             distance = np.zeros([2])
             
             for i in range(2):
-                edgenodes[i,:] = self.CheckNodeOnEdge(XIeint[i,:],self.ElType,XIe,1e-4)
+                edgenodes[i,:] = self.CheckNodeOnEdge(XIeint[i,:],self.numvertices,XIe,1e-4)
             commonnode = (set(edgenodes[0,:])&set(edgenodes[1,:])).pop()
             # LOOK FOR NODE ON EDGE WHERE INTERSECTION POINT LIES BUT OTHER THAN COMMON NODE AND COMPUTE DISTANCE
             for i in range(2):
@@ -473,7 +469,7 @@ class Element:
                 edgenode = np.zeros([2],dtype=int)
                 distance = np.zeros([2])
                 for i in range(2):
-                    edgenodes[i,:] = self.CheckNodeOnEdge(XIeint[i,:],self.ElType,XIe,1e-4)
+                    edgenodes[i,:] = self.CheckNodeOnEdge(XIeint[i,:],self.numvertices,XIe,1e-4)
                 commonnode = (set(edgenodes[0,:])&set(edgenodes[1,:])).pop()
                 # LOOK FOR NODE ON EDGE WHERE INTERSECTION POINT LIES BUT OTHER THAN COMMON NODE
                 for i in range(2):

@@ -860,7 +860,8 @@ class GradShafranovCutFEM:
                             region = -1
                             
                         # CHECK LEVEL-SET SIGN ON ELEMENTAL 'HIGH ORDER' NODES
-                        for i in range(self.numvertices,self.n-self.numvertices):  # LOOP OVER NODES WHICH ARE NOT ON VERTICES
+                        #for i in range(self.numvertices,self.n-self.numvertices):  # LOOP OVER NODES WHICH ARE NOT ON VERTICES
+                        for i in range(self.numvertices,self.n):
                             if np.sign(LSe[i]) != np.sign(LSe[0]):
                                 DiffHighOrderNodes.append(i)
                 
