@@ -90,8 +90,8 @@ class Element:
     def ElementalInterpolation(self,X,Fe):
         """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
         F = 0
+        Xi = self.InverseMapping(X)
         for i in range(self.n):
-            Xi = self.InverseMapping(X)
             N, foo, foo = ShapeFunctionsReference(Xi, self.ElType, self.ElOrder, i+1)
             F += N*Fe[i]
         return F

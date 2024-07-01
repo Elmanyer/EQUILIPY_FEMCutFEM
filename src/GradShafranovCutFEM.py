@@ -1092,7 +1092,7 @@ class GradShafranovCutFEM:
         
         # FIND SOLUTION OF  GRAD(PHI) = 0   NEAR MAGNETIC AXIS AND SADDLE POINT 
         if self.it == 1:
-            self.Xcrit = np.zeros([2,2,3])  # [(iterations n, n+1), (extremum, saddle point), (R_crit,Z_crit,PHI_crit)]
+            self.Xcrit = np.zeros([2,2,3])  # [(iterations n, n+1), (extremum, saddle point), (R_crit,Z_crit,elem_crit)]
             X0_extr = np.array([6,0])
             X0_saddle = np.array([5,-4])
         else:
@@ -1571,12 +1571,41 @@ class GradShafranovCutFEM:
             
             else:
                 ###### UPDATE PLASMA REGION LEVEL-SET FUNCTION VALUES ACCORDING TO SOLUTION OBTAINED
-                # RECALL THAT PLASMA REGION IS DEFINED BY NEGATIVE VALUES OF LEVEL-SET
+                # . RECALL THAT PLASMA REGION IS DEFINED BY NEGATIVE VALUES OF LEVEL-SET -> NEED TO INVERT SIGN
+                # . CLOSED GEOMETRY DEFINED BY 0-LEVEL CONTOUR BENEATH ACTIVE SADDLE POINT (DIVERTOR REGION) NEEDS TO BE
+                #   DISCARTED BECAUSE THE LEVEL-SET DESCRIBES ONLY THE PLASMA REGION GEOMETRY -> NEED TO POST-PROCESS CUTFEM
+                #   SOLUTION IN ORDER TO TAKE ITS 0-LEVEL CONTOUR ENCLOSING ONLY THE PLASMA REGION. 
+                
+                # 1. INVERT SIGN DEPENDING ON SOLUTION PLASMA REGION SIGN
+                if self.PHI_0 > 0: # WHEN THE OBTAINED SOLUTION IS POSITIVE INSIDE THE PLASMA
+                    self.PlasmaBoundLevSet = -self.PHI_NORM[:,1].copy()
+                else: # WHEN THE OBTAINED SOLUTION IS NEGATIVE INSIDE THE PLASMA
+                    self.PlasmaBoundLevSet = self.PHI_NORM[:,1].copy() 
+                    
+                # 2. DISCARD DIVERTOR ENCLOSED REGION (BENEATH ACTIVE SADDLE POINT)
+                Zlow = self.Xcrit[1,1,1] - 0.05
                 for i in range(self.Nn):  
-                    if self.X[i,0] < 3 or self.X[i,1] < self.Xcrit[1,1,1]:
-                        self.PlasmaBoundLevSet[i] = np.abs(self.PHI_NORM[i,1])
-                    else:
-                        self.PlasmaBoundLevSet[i] = -self.PHI_NORM[i,1]
+                    if self.X[i,1] < Zlow:
+                        self.PlasmaBoundLevSet[i] = np.abs(self.PlasmaBoundLevSet[i])
+                        
+                # 3. DISCARD POSSIBLE EXISTING ENCLOSED REGIONS AT LEFT-HAND-SIDE FROM PLASMA REGION
+                # OBTAIN LEFTMOST POINT FROM PLASMA REGION SEPARATRIX
+                fig, ax = plt.subplots(figsize=(6, 8))
+                cs = ax.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0])
+                for item in cs.collections:
+                    for i in item.get_paths():
+                        v = i.vertices
+                        x_equ = v[:, 0]+0.1
+                        y_equ = v[:, 1]+0.1
+                fig.clear()
+                plt.close(fig)
+                
+                Rleft = np.min(x_equ) - 0.2
+                for i in range(self.Nn):  
+                    if self.X[i,0] < Rleft:  # DISCARD LEVEL-SET REGION LEFT FROM LEFTMOST POINT
+                        self.PlasmaBoundLevSet[i] = np.abs(self.PlasmaBoundLevSet[i])
+                        
+                #self.PlotLevelSetEvolution(Zlow,Rleft)
 
                 ###### UPDATE PLASMA REGION LEVEL-SET ELEMENTAL VALUES     
                 for ELEMENT in self.Elements:
@@ -1724,7 +1753,7 @@ class GradShafranovCutFEM:
                 self.StoreMeshConfiguration()
                 print('OUTER ITERATION = '+str(self.it_EXT)+' , INNER ITERATION = '+str(self.it_INT))
                 ##################################
-                self.PlotClassifiedElements_2()
+                #self.PlotClassifiedElements_2()
                 # COMPUTE TOTAL PLASMA CURRENT CORRECTION FACTOR
                 if self.PLASMA_CURRENT == "PROFILES":
                     #self.ComputeTotalPlasmaCurrentNormalization()
@@ -1908,6 +1937,29 @@ class GradShafranovCutFEM:
         return
     
     
+    def PlotLevelSetEvolution(self,Zlow,Rleft):
+        
+        fig, axs = plt.subplots(1, 2, figsize=(10,5))
+        axs[0].set_xlim(self.Xmin,self.Xmax)
+        axs[0].set_ylim(self.Ymin,self.Ymax)
+        a = axs[0].tricontourf(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=30)
+        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=[0], colors = 'black')
+        plt.colorbar(a, ax=axs[0])
+
+        axs[1].set_xlim(self.Xmin,self.Xmax)
+        axs[1].set_ylim(self.Ymin,self.Ymax)
+        a = axs[1].tricontourf(self.X[:,0],self.X[:,1], np.sign(self.PlasmaBoundLevSet), levels=30)
+        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=[0], colors = 'black',linewidths = 3)
+        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red',linestyles = 'dashed')
+        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet_ALL[:,self.it-1], levels=[0], colors = 'orange',linestyles = 'dashed')
+        axs[1].plot([self.Xmin,self.Xmax],[Zlow,Zlow],color = 'green')
+        axs[1].plot([Rleft,Rleft],[self.Ymin,self.Ymax],color = 'green')
+
+        plt.show()
+        
+        return
+    
+    
     def PlotMesh(self):
         Tmesh = self.T + 1
         # Plot nodes
@@ -2060,8 +2112,6 @@ class GradShafranovCutFEM:
     
     
     # PREPARE FUNCTION WHICH PLOTS AT THE SAME TIME PHI_Dg and PHI_Bg, that is plots PHI_g
-    
-    
     def PlotInterfaceValues(self):
         """ Function which plots the values PHI_g at the interface edges, for both the plasma/vacuum interface and the vacuum vessel first wall. """
         import matplotlib as mpl

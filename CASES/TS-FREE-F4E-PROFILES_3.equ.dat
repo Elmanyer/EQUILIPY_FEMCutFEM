@@ -1,0 +1,132 @@
+$------------------------------------------------------------                         
+PHYSICAL_PROBLEM  
+
+   PLASMA_BOUNDARY:    FREE
+   PLASMA_GEOMETRY:    F4E  
+   PLASMA_CURRENT:     PROFILES
+   VACUUM_VESSEL:      COMPUTATIONAL_DOMAIN
+ 
+   NUMMATERIALS:          1        $ 1>CHAMBER  2> CHAMBER+METAL 3<CHAMBER+METAL+VACUUM
+   TOTAL_CURRENT:         -15000000.0 
+$   CTE_PLASMA:            100.0
+   GEOMETRY:              AXISYMETRIC   $ FULL3D
+
+$$ VACUUM VESSEL GEOMETRY: (ITER)                       
+   R_MAX:       8.0       $ PLASMA REGION MAJOR RADIUS  
+   R_MIN:       4.0       $ PLASMA REGION MINOR RADIUS
+   EPSILON:     0.32      $ PLASMA REGION INVERSE ASPECT RATIO
+   KAPPA:       1.7       $ PLASMA REGION ELONGATION
+   DELTA:       0.33      $ PLASMA REGION TRIANGULARITY
+
+$$ PLASMA REGION GEOMETRY: (ITER)
+   CONTROL_POINTS:        4
+   R_SADDLE:              5.5 
+   Z_SADDLE:              -2.7 
+   R_RIGHTMOST:           7.2
+   Z_RIGHTMOST:           0.2
+   R_LEFTMOST:            4.8
+   Z_LEFTMOST:            0.6
+   R_TOP:                 5.9
+   Z_TOP:                 2.4
+
+$$ PARAMETERS FOR PRESSURE AND TOROIDAL FIEL PROFILES
+   B0:      9.0      $ TOROIDAL FIELD MAGNITUDE ON MAGNETIC AXIS
+   q0:      0.7       $ TOKAMAK SAFETY FACTOR
+   n_p:     2.0       $ EXPONENT FOR PRESSURE PROFILE p_hat FUNCTION
+   g0:      -34.4       $ 1 TOROIDAL FIELD VALUE AT MAGNETIC AXIS
+   n_g:     2.0       $ EXPONENT FOR TOROIDAL FIELD PROFILE g_hat FUNCTION
+
+$$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
+   N_COILS:              6
+   Rposi:   3.9431
+   Zposi:   7.5741    
+   Inten:   573000.0
+
+   Rposi:   8.2851
+   Zposi:   6.5398   
+   Inten:   -288000.0
+
+   Rposi:   11.9919
+   Zposi:   3.2752  
+   Inten:   -581000.0
+
+   Rposi:   11.9630
+   Zposi:   -2.2336  
+   Inten:   -478000.0
+
+   Rposi:   8.3908
+   Zposi:   -6.7269  
+   Inten:   -781000.0
+
+   Rposi:   4.3340
+   Zposi:   -7.4665  
+   Inten:   1694000.0
+
+   N_SOLENOIDS:          5
+   Rposi:   1.696
+   Zlow:    -5.415
+   Zup:     -3.6067
+   Inten:   5300000.0
+
+   Rposi:   1.696
+   Zlow:    -3.6067
+   Zup:     -1.7983
+   Inten:   -10300000.0
+
+   Rposi:   1.696
+   Zlow:    -1.7983
+   Zup:     1.8183
+   Inten:   -20800000.0
+
+   Rposi:   1.696
+   Zlow:    1.8183
+   Zup:     3.6267
+   Inten:   -4050000.0
+
+   Rposi:   1.696
+   Zlow:    3.6267
+   Zup:     5.435
+   Inten:   -4820000.0
+
+  PROPERTIES: 1
+  MASS_DENSITY_1: 1.0
+  NUMBER_DENSITY_1: 1.0
+                                                  
+END_PHYSICAL_PROBLEM                                                                  
+$------------------------------------------------------------                         
+NUMERICAL_TREATMENT    
+  QUADRATURE_ORDER:  2         $ ORDER OF NUMERICAL INTEGRATION QUADRATURES                    
+  EXT_ITER:          10        $ EXTERNAL LOOP (PHI_B) MAXIMUM ITERATIONS
+  EXT_TOL:           1.0e-6    $ EXTERNAL LOOP (PHI_B) CONVERGENCE TOLERANCE
+  INT_ITER:          10        $ INTERNAL LOOP (PHI_NORM) MAXIMUM ITERATIONS
+  INT_TOL:           1.0e-6    $ INTERNAL LOOP (PHI_NORM) CONVERGENCE TOLERANCE
+  BETA:              1.0e12    $ NITSCHE'S METHOD PENALTY PARAMETER
+  RELAXATION:        1.0       $ AIKITEN'S METHOD RELAXATION PARAMETER 
+
+  ! OJO guillaume ??                               
+  ALGEBRAIC_SOLVER     
+    SOLVER:                GMRES, KRYLOV=20
+    CONVERGENCE:           ITERA=10000, TOLER=1.0e-10, ADAPTIVE, RATIO=1.0e-3
+    OUTPUT:                CONVERGENCE
+    PRECONDITIONER:        DIAGONAL
+  END_ALGEBRAIC_SOLVER        
+
+END_NUMERICAL_TREATMENT                                                         
+$------------------------------------------------------------
+OUTPUT_&_POST_PROCESS  
+
+  POSTPROCESS PHIPOL,  STEPS=1
+$  POSTPROCESS CURRENT, STEPS=1
+  POSTPROCESS BFIELD,  STEPS=1
+$  POSTPROCESS AFIELD,  STEPS=1
+$  POSTPROCESS PRESS,  STEPS=1
+
+END_OUTPUT_&_POST_PROCESS  
+$------------------------------------------------------------
+BOUNDARY_CONDITIONS
+   CODES, NODES
+     1 5 1.0
+     2 1 0.0
+   END_CODES
+END_BOUNDARY_CONDITIONS  
+$------------------------------------------------------------
