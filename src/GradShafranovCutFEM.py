@@ -59,7 +59,18 @@ class GradShafranovCutFEM:
         self.Rmax = None                    # PLASMA REGION MAJOR RADIUS
         self.Rmin = None                    # PLASMA REGION MINOR RADIUS
         self.R0 = None                      # PLASMA REGION MEAN RADIUS
-        
+
+        # PARAMETRISED INITIAL PLASMA EQUILIBRIUM GUESS
+        self.CONTROL_POINTS = None          # NUMBER OF CONTROL POINTS
+        self.R_SADDLE = None                # R COORDINATE OF ACTIVE SADDLE POINT
+        self.Z_SADDLE = None                # Z COORDINATE OF ACTIVE SADDLE POINT
+        self.R_RIGHTMOST = None             # R COORDINATE OF POINT ON THE RIGHT
+        self.Z_RIGHTMOST = None             # Z COORDINATE OF POINT ON THE RIGHT
+        self.R_LEFTMOST = None              # R COORDINATE OF POINT ON THE LEFT
+        self.Z_LEFTMOST = None              # Z COORDINATE OF POINT ON THE LEFT
+        self.R_TOPP = None                  # R COORDINATE OF POINT ON TOP
+        self.Z_TOPP = None                  # Z COORDINATE OF POINT ON TOP
+                
         ###### FOR FREE-BOUNDARY PROBLEM
         # PARAMETERS FOR COILS
         self.Ncoils = None                  # TOTAL NUMBER OF COILS
