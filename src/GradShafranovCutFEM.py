@@ -767,7 +767,7 @@ class GradShafranovCutFEM:
                     for point in range(self.Elements[element].InterEdges[edge].Ngaussint):
                         # ISOLATE NODAL COORDINATES
                         Xnode = self.Elements[element].InterEdges[edge].Xgint[point,:]
-        
+                        
                         # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
                         for icoil in range(self.Ncoils): 
                             PHI_B[k] += self.mu0 * GreenFunction(Xnode,self.Xcoils[icoil,:]) * self.Icoils[icoil]
@@ -781,7 +781,7 @@ class GradShafranovCutFEM:
                                 # MAPP 1D REFERENCE INTEGRATION GAUSS NODES TO PHYSICAL SPACE ON SOLENOID
                                 Xgsole = self.N1D[ig,:] @ Xsole
                                 # COMPUTE DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL SOLENOID 
-                                detJ1D = Jacobian1D(Xsole[0,:],Xsole[1,:],self.dNdxi1D[ig,:])
+                                detJ1D = Jacobian1D(Xsole[:,0],Xsole[:,1],self.dNdxi1D[ig,:])
                                 detJ1D = detJ1D*2*np.pi*np.mean(Xsole[:,0])
                                 for l in range(self.nsole):
                                     PHI_B[k] += self.mu0 * GreenFunction(Xnode,Xgsole) * Jsole * self.N1D[ig,l] * detJ1D * self.Wg1D[ig]
@@ -798,7 +798,7 @@ class GradShafranovCutFEM:
                                 for l in range(ELEMENT.n):
                                     PHI_B[k] += self.mu0 * GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
                                                                             PHIg[ig])*ELEMENT.N[ig,l]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]*self.gamma
-                            
+                                    
                         #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
                         for elem in self.PlasmaBoundElems:
                             # ISOLATE ELEMENT OBJECT
@@ -812,7 +812,7 @@ class GradShafranovCutFEM:
                                     for ig in range(SUBELEM.Ng2D):
                                         for l in range(SUBELEM.n):
                                             PHI_B[k] += self.mu0 * GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
-                                                                    PHIg[ig])*SUBELEM.N[ig,l]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*self.gamma               
+                                                                    PHIg[ig])*SUBELEM.N[ig,l]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*self.gamma   
                         k += 1
         return PHI_B
     
@@ -2136,7 +2136,7 @@ class GradShafranovCutFEM:
         l = 0
         for elem in self.PlasmaBoundElems:
             for edge in range(self.Elements[elem].Neint):
-                for point in range(self.Elements[elem].Ng1D):
+                for point in range(self.Elements[elem].InterEdges[edge].Ngaussint):
                     X_Dg[k,:] = self.Elements[elem].Xgint[edge,point]
                     PHI_Dg[k] = self.Elements[elem].PHI_g[edge,point]
                     k += 1
@@ -2154,7 +2154,7 @@ class GradShafranovCutFEM:
         l = 0
         for elem in self.VacVessWallElems:
             for edge in range(self.Elements[elem].Neint):
-                for point in range(self.Elements[elem].Ng1D):
+                for point in range(self.Elements[elem].InterEdges[edge].Ngaussint):
                     X_Bg[k,:] = self.Elements[elem].Xgint[edge,point]
                     k += 1
             for node in range(self.Elements[elem].n):
