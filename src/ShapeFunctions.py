@@ -37,17 +37,17 @@ def ShapeFunctionsReference(X, elemType, elemOrder, node):
                             N = (1+xi)/2
                             dNdxi = 1/2       
                 case 2:         
-                    # 1---2---3
+                    # 1---3---2
                     match node:
                         case 1:
-                            N = xi*(xi-1)/2
+                            N = -xi*(1-xi)/2
                             dNdxi = xi-0.5
                         case 2:
-                            N = (1-xi**2)
-                            dNdxi = -2*xi
-                        case 3:
                             N = xi*(xi+1)/2
                             dNdxi = xi+0.5
+                        case 3:
+                            N = 1-xi**2
+                            dNdxi = -2*xi
     
         case 1:   # TRIANGLE
             xi = X[0]

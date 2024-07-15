@@ -420,7 +420,13 @@ class GradShafranovCutFEM:
         
         if self.PLASMA_CURRENT == "PROFILES":
             # COMPUTE PRESSURE PROFILE FACTOR
-            self.P0=self.B0*(self.kappa**2+1)/(self.mu0*self.R0**2*self.q0*self.kappa)
+            self.P0=self.B0*((self.kappa**2)+1)/(self.mu0*(self.R0**2)*self.q0*self.kappa)
+            
+            """print('B0 = ',self.B0)
+            print(self.kappa)
+            print(self.R0)
+            print(self.q0)
+            print(self.P0)"""
             
         # PREPARE MATRICES FOR STORING ALL RESULTS
         self.PHI_NORM_ALL = np.zeros([self.Nn, self.INT_ITER*self.EXT_ITER])
@@ -498,6 +504,12 @@ class GradShafranovCutFEM:
         elif self.PLASMA_CURRENT == "PROFILES":
             ## OPTION WITH GAMMA APPLIED TO funG AND WITHOUT denom
             jphi = -R * self.dPdphi(PHI) - 0.5*self.dG2dphi(PHI)/ (R*self.mu0)
+            
+            """print(self.P0)
+            print(R,Z, PHI)
+            print(self.dPdphi(PHI))
+            print(self.dG2dphi(PHI))
+            print(jphi)"""
             
         return jphi
     
@@ -760,6 +772,10 @@ class GradShafranovCutFEM:
         # FOR FIXED PLASMA BOUNDARY PROBLEM THE VACUUM VESSEL BOUNDARY VALUES PHI_B ARE IRRELEVANT ->> PHI_B = 0
     
         if self.PLASMA_BOUNDARY == 'FREE':
+            
+            print(' ')
+            print('gamma = ',self.gamma)
+            
             k = 0
             # COMPUTE PHI_B VALUE ON EACH VACUUM VESSEL ELEMENT FIRST WALL INTERFACE INTEGRATION POINTS
             for element in self.VacVessWallElems:
@@ -768,9 +784,13 @@ class GradShafranovCutFEM:
                         # ISOLATE NODAL COORDINATES
                         Xnode = self.Elements[element].InterEdges[edge].Xgint[point,:]
                         
+                        print(element,edge,point,Xnode)
+                        
                         # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
                         for icoil in range(self.Ncoils): 
                             PHI_B[k] += self.mu0 * GreenFunction(Xnode,self.Xcoils[icoil,:]) * self.Icoils[icoil]
+                            
+                        print(PHI_B[k])
                 
                         # CONTRIBUTION FROM EXTERNAL SOLENOIDS CURRENT  ->>  INTEGRATE OVER SOLENOID LENGTH 
                         for isole in range(self.Nsolenoids):
@@ -785,6 +805,8 @@ class GradShafranovCutFEM:
                                 detJ1D = detJ1D*2*np.pi*np.mean(Xsole[:,0])
                                 for l in range(self.nsole):
                                     PHI_B[k] += self.mu0 * GreenFunction(Xnode,Xgsole) * Jsole * self.N1D[ig,l] * detJ1D * self.Wg1D[ig]
+                                    
+                        print(PHI_B[k])
                     
                         # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
                         #   1. INTEGRATE IN PLASMA ELEMENTS
@@ -798,6 +820,8 @@ class GradShafranovCutFEM:
                                 for l in range(ELEMENT.n):
                                     PHI_B[k] += self.mu0 * GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
                                                                             PHIg[ig])*ELEMENT.N[ig,l]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]*self.gamma
+                                    
+                        print(PHI_B[k])
                                     
                         #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
                         for elem in self.PlasmaBoundElems:
@@ -813,6 +837,9 @@ class GradShafranovCutFEM:
                                         for l in range(SUBELEM.n):
                                             PHI_B[k] += self.mu0 * GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
                                                                     PHIg[ig])*SUBELEM.N[ig,l]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*self.gamma   
+                        
+                        print(PHI_B[k])
+                        
                         k += 1
         return PHI_B
     
@@ -1167,18 +1194,36 @@ class GradShafranovCutFEM:
         
         Tcurrent = 0
         # INTEGRATE OVER PLASMA ELEMENTS
+        #print('PLASMA ELEMENTS')
         for elem in self.PlasmaElems:
             # ISOLATE ELEMENT
             ELEMENT = self.Elements[elem]
             # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
             PHIg = ELEMENT.N @ ELEMENT.PHIe
-            # LOOP OVER GAUSS NODES
-            for ig in range(ELEMENT.Ng2D):
-                # LOOP OVER ELEMENTAL NODES
-                for i in range(ELEMENT.n):
+            
+            print(ELEMENT.index)
+            print(ELEMENT.N)
+            print(ELEMENT.Wg2D)
+            print(ELEMENT.PHIe)
+            print(PHIg)
+            print("ALL GOOD UP TO HERE")
+            
+            # LOOP OVER ELEMENTAL NODES
+            for i in range(ELEMENT.n):
+                 # LOOP OVER GAUSS NODES
+                for ig in range(ELEMENT.Ng2D):
+                    
+                    if i == 0:
+                        print(ELEMENT.Xg2D[ig,:])
+                        print('Jphi'+str(ig)+' = ',self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig]))
+                        print('detJ'+str(ig)+' = ',ELEMENT.detJg[ig])
+                    
                     Tcurrent += self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])*ELEMENT.N[ig,i]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]
                     
+                    print(Tcurrent)
+                    
         # INTEGRATE OVER INTERFACE ELEMENTS, FOR SUBELEMENTS INSIDE PLASMA REGION
+        print("PLASMA SUBELEMENTS")
         for elem in self.PlasmaBoundElems:
             # ISOLATE ELEMENT
             ELEMENT = self.Elements[elem]
@@ -1199,9 +1244,14 @@ class GradShafranovCutFEM:
     def ComputeTotalPlasmaCurrentNormalization(self):
         """ Function that computes the correction factor so that the total current flowing through the plasma region is constant and equal to input file parameter TOTAL_CURRENT. """
         
+        # COMPUTE TOTAL PLASMA CURRENT    
         Tcurrent = self.ComputeTotalPlasmaCurrent()
+        print('Total plasma current computed = ', Tcurrent)    
         # COMPUTE TOTAL PLASMA CURRENT CORRECTION FACTOR            
         self.gamma = self.TOTAL_CURRENT/Tcurrent
+        print("Total plasma current normalization factor = ", self.gamma)
+        # COMPUTED NORMALISED TOTAL PLASMA CURRENT
+        print("Normalised total plasma current = ", Tcurrent*self.gamma)
         
         """Int1 = 0
         Int2 = 0
@@ -1427,9 +1477,6 @@ class GradShafranovCutFEM:
         if self.PLASMA_CURRENT == "PROFILES":
             self.gamma = 1
             self.ComputeTotalPlasmaCurrentNormalization()
-            print("Total plasma current normalization factor = ", self.gamma)
-            Tcurrent = self.ComputeTotalPlasmaCurrent()
-            print("Normalised total plasma current = ", Tcurrent*self.gamma)
         
         ####### INITIALISE PHI_B UNKNOWN VECTORS
         # NODES ON VACUUM VESSEL FIRST WALL GEOMETRY FOR WHICH TO EVALUATE PHI_B VALUES == GAUSS INTEGRATION NODES ON FIRST WALL EDGES
@@ -1558,10 +1605,10 @@ class GradShafranovCutFEM:
                 
         # COMPUTE 1D NUMERICAL INTEGRATION QUADRATURES TO INTEGRATE ALONG SOLENOIDS
         #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
-        XIg1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,self.QuadratureOrder)
+        self.XIg1D, self.Wg1D, self.Ng1D = GaussQuadrature(0,self.QuadratureOrder)
         # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
         #### QUADRATURE TO INTEGRATE LINES (1D)
-        self.N1D, self.dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1D, 0, self.QuadratureOrder-1, self.nsole)
+        self.N1D, self.dNdxi1D, foo = EvaluateReferenceShapeFunctions(self.XIg1D, 0, self.nsole-1, self.nsole)
         return
     
     #################### UPDATE EMBEDED METHOD ##############################
@@ -1788,9 +1835,6 @@ class GradShafranovCutFEM:
                 
                 ##################################
             self.ComputeTotalPlasmaCurrentNormalization()
-            print("Total plasma current normalization factor = ", self.gamma)
-            Tcurrent = self.ComputeTotalPlasmaCurrent()
-            print("Normalised total plasma current = ", Tcurrent*self.gamma)
             print('COMPUTE VACUUM VESSEL FIRST WALL VALUES PHI_B...', end="")
             self.PHI_B[:,1] = self.ComputePHI_B()     # COMPUTE VACUUM VESSEL FIRST WALL VALUES PHI_B WITH INTERNALLY CONVERGED PHI_NORM
             print('Done!')
@@ -1896,7 +1940,7 @@ class GradShafranovCutFEM:
     
     def InspectElement(self,element_index,INTERFACE,QUADRATURE):
         
-        ELEM = self.Elements[element_index]
+        ELEM = self.Elements[0]
         Xmin = np.min(ELEM.Xe[:,0])-0.1
         Xmax = np.max(ELEM.Xe[:,0])+0.1
         Ymin = np.min(ELEM.Xe[:,1])-0.1
@@ -1916,35 +1960,47 @@ class GradShafranovCutFEM:
             color = 'cyan'
         elif ELEM.Dom == 3:
             color = 'black'
-        
+
         fig, axs = plt.subplots(1, 2, figsize=(10,6))
         axs[0].set_xlim(self.Xmin-0.25,self.Xmax+0.25)
         axs[0].set_ylim(self.Ymin-0.25,self.Ymax+0.25)
         axs[0].tricontourf(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=30, cmap='plasma')
         axs[0].tricontour(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=[0], colors = 'black')
         axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        # PLOT ELEMENT EDGES
         for iedge in range(numedges):
             axs[0].plot([ELEM.Xe[iedge,0],ELEM.Xe[int((iedge+1)%ELEM.numedges),0]],[ELEM.Xe[iedge,1],ELEM.Xe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=3)
-        
+
         axs[1].set_xlim(Xmin,Xmax)
         axs[1].set_ylim(Ymin,Ymax)
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        # PLOT ELEMENT EDGES
         for iedge in range(ELEM.numedges):
             axs[1].plot([ELEM.Xe[iedge,0],ELEM.Xe[int((iedge+1)%ELEM.numedges),0]],[ELEM.Xe[iedge,1],ELEM.Xe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=3)
-        axs[1].scatter(ELEM.Xe[:,0],ELEM.Xe[:,1], marker='o', s=50)
+        axs[1].scatter(ELEM.Xe[:,0],ELEM.Xe[:,1], marker='o', s=70, zorder=5)
         if INTERFACE:
-            axs[1].scatter(ELEM.InterEdges[0].Xeint[:,0],ELEM.InterEdges[0].Xeint[:,1],marker='x',s=50)
+            for iedge in range(ELEM.Neint):
+                axs[1].scatter(ELEM.InterEdges[iedge].Xeint[:,0],ELEM.InterEdges[iedge].Xeint[:,1],marker='.',color='red',s=50, zorder=5)
         if QUADRATURE:
             if ELEM.Dom == -1 or ELEM.Dom == 1 or ELEM.Dom == 3:
                 # PLOT QUADRATURE INTEGRATION POINTS
                 axs[1].scatter(ELEM.Xg2D[:,0],ELEM.Xg2D[:,1],marker='x',c='black')
+            elif ELEM.Dom == 2 and self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+                # PLOT QUADRATURE INTEGRATION POINTS
+                axs[1].scatter(ELEM.Xg2D[:,0],ELEM.Xg2D[:,1],marker='x',c='black', zorder=5)
+                # PLOT INTERFACE INTEGRATION POINTS
+                for iedge in range(ELEM.Neint):
+                    axs[1].scatter(ELEM.InterEdges[iedge].Xgint[:,0],ELEM.InterEdges[iedge].Xgint[:,1],marker='x',color='grey',s=50, zorder = 5)
             else:
                 for SUBELEM in ELEM.SubElements:
                     # PLOT SUBELEMENT EDGES
                     for i in range(numedges):
                         plt.plot([SUBELEM.Xe[i,0], SUBELEM.Xe[(i+1)%SUBELEM.n,0]], [SUBELEM.Xe[i,1], SUBELEM.Xe[(i+1)%SUBELEM.n,1]], color='black', linewidth=1)
                     # PLOT QUADRATURE INTEGRATION POINTS
-                    plt.scatter(SUBELEM.Xg2D[:,0],SUBELEM.Xg2D[:,1],marker='x',c='grey')
+                    plt.scatter(SUBELEM.Xg2D[:,0],SUBELEM.Xg2D[:,1],marker='x',c='grey', zorder=5)
+                # PLOT INTERFACE INTEGRATION POINTS
+                for iedge in range(ELEM.Neint):
+                    axs[1].scatter(ELEM.InterEdges[iedge].Xgint[:,0],ELEM.InterEdges[iedge].Xgint[:,1],marker='x',color='grey',s=50, zorder=5)
         return
     
     
@@ -2137,8 +2193,8 @@ class GradShafranovCutFEM:
         for elem in self.PlasmaBoundElems:
             for edge in range(self.Elements[elem].Neint):
                 for point in range(self.Elements[elem].InterEdges[edge].Ngaussint):
-                    X_Dg[k,:] = self.Elements[elem].Xgint[edge,point]
-                    PHI_Dg[k] = self.Elements[elem].PHI_g[edge,point]
+                    X_Dg[k,:] = self.Elements[elem].InterEdges[edge].Xgint[point]
+                    PHI_Dg[k] = self.Elements[elem].InterEdges[edge].PHI_g[point]
                     k += 1
             for node in range(self.Elements[elem].n):
                 X_D[l,:] = self.Elements[elem].Xe[node,:]
@@ -2147,7 +2203,7 @@ class GradShafranovCutFEM:
             
         # COLLECT PHI_g DATA ON VACUUM VESSEL FIRST WALL  
         X_Bg = np.zeros([self.NnFW,self.dim])
-        PHI_Bg = self.PHI_B[:,0]
+        PHI_Bg = np.zeros([self.NnFW])
         X_B = np.zeros([len(self.VacVessWallElems)*self.n,self.dim])
         PHI_B = np.zeros([len(self.VacVessWallElems)*self.n])
         k = 0
@@ -2155,7 +2211,8 @@ class GradShafranovCutFEM:
         for elem in self.VacVessWallElems:
             for edge in range(self.Elements[elem].Neint):
                 for point in range(self.Elements[elem].InterEdges[edge].Ngaussint):
-                    X_Bg[k,:] = self.Elements[elem].Xgint[edge,point]
+                    X_Bg[k,:] = self.Elements[elem].InterEdges[edge].Xgint[point]
+                    PHI_Bg[k] = self.Elements[elem].InterEdges[edge].PHI_g[point]
                     k += 1
             for node in range(self.Elements[elem].n):
                 X_B[l,:] = self.Elements[elem].Xe[node,:]

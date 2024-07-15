@@ -123,8 +123,8 @@ class Element:
         # OBTAIN INTERSECTION COORDINATES FOR EACH EDGE:
         self.Neint = 1
         self.InterEdges = [Segment(index = interface_index,
-                                    ElOrder = 1,   # WE ARE ONLY INTEREDTED IN THE VERTICES OF THE SEGMENT CUTING THE ELEMENT ->> 2 NODES 
-                                    Xeint = np.zeros([2,self.dim]),  # HERE WILL BE STORED THE SEGMENT VERTICES COORDINATES
+                                    ElOrder = self.ElOrder,   
+                                    Xeint = np.zeros([self.nedge,self.dim]),  # HERE WILL BE STORED THE SEGMENT POINTS COORDINATES
                                     int_edges = np.zeros([2,2])) for interf in range(self.Neint)]   # HERE WILL BE STORED THE LOCAL INDICES OF THE VERTICES DEFINING THE EDGES WHERE THE INTERSECTION POINTS LIE
         
         for interf in range(self.Neint):
@@ -139,7 +139,18 @@ class Element:
                     t = LSe[i] / (LSe[i] - LSe[(i + 1) % self.numedges])
                     self.InterEdges[interf].Xeint[k,:] = (1 - t) * self.Xe[i,:] + t * self.Xe[(i + 1) % self.numedges,:]
                     k += 1
-        
+                    
+        # FOR HIGH ORDER ELEMENTS, THE INTERFACE EDGE IS MODELED USING A 1D ELEMENT OF THE SAME TYPE 
+        # AS THE ELEMENTAL EDGE. THAT IS, FOR LINEAR ELEMENTS THE EDGE IS TAKEN AS A BAR02, FOR 
+        # QUADRATIC ELEMENTS THE EDGE IS TAKEN AS A BAR03, ETC. THEREFORE, THE INNER 1D ELEMENT POINTS 
+        # NEED TO BE COMPUTED ADDITIONALLY USING THE BAR END POINTS
+            if self.ElOrder > 1:
+                dx = np.abs(self.InterEdges[interf].Xeint[1,0]-self.InterEdges[interf].Xeint[0,0])/(self.nedge-1)
+                dy = np.abs(self.InterEdges[interf].Xeint[1,1]-self.InterEdges[interf].Xeint[0,1])/(self.nedge-1)
+                for iinnernode in range(2,self.nedge):
+                    self.InterEdges[interf].Xeint[iinnernode,:] = [np.min(self.InterEdges[interf].Xeint[:2,0])+(iinnernode-1)*dx,
+                                                                   np.min(self.InterEdges[interf].Xeint[:2,1])+(iinnernode-1)*dy]
+                
         return 
     
     
@@ -161,8 +172,8 @@ class Element:
         self.Neint = len(interface)                                 # NUMBER OF ELEMENTAL EDGES ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
         
         self.InterEdges = [Segment(index = interface[interf],
-                                    ElOrder = 1,   # WE ARE ONLY INTEREDTED IN THE VERTICES OF THE SEGMENT CUTING THE ELEMENT ->> 2 NODES 
-                                    Xeint = np.zeros([2,self.dim]),   # HERE WILL BE STORED THE SEGMENT VERTICES COORDINATES
+                                    ElOrder = self.ElOrder,    
+                                    Xeint = np.zeros([self.nedge,self.dim]),  
                                     int_edges = np.zeros([2])) for interf in range(self.Neint)]   # HERE WILL BE STORED THE LOCAL INDICES OF THE VERTICES DEFINING THE EDGES WHERE THE INTERSECTION POINTS LIE
         
         for interf, index in enumerate(interface):
@@ -188,7 +199,7 @@ class Element:
             dy = self.InterEdges[edge].Xeint[1,1] - self.InterEdges[edge].Xeint[0,1]
             ntest = np.array([-dy, dx])   # test this normal vector
             ntest = ntest/np.linalg.norm(ntest)   # normalize
-            Xintmean = np.array([np.mean(self.InterEdges[edge].Xeint[:,0]), np.mean(self.InterEdges[edge].Xeint[:,1])])  # mean point on interface
+            Xintmean = np.array([np.mean(self.InterEdges[edge].Xeint[0:2,0]), np.mean(self.InterEdges[edge].Xeint[0:2,1])])  # mean point on interface
             Xtest = Xintmean + 3*ntest  # physical point on which to test the Level-Set 
             
             # INTERPOLATE LEVEL-SET ON XTEST
@@ -221,7 +232,7 @@ class Element:
             dy = self.InterEdges[edge].Xeint[1,1] - self.InterEdges[edge].Xeint[0,1]
             ntest = np.array([-dy, dx])   # test this normal vector
             ntest = ntest/np.linalg.norm(ntest)   # normalize
-            Xintmean = np.array([np.mean(self.InterEdges[edge].Xeint[:,0]), np.mean(self.InterEdges[edge].Xeint[:,1])])  # mean point on interface
+            Xintmean = np.array([np.mean(self.InterEdges[edge].Xeint[0:2,0]), np.mean(self.InterEdges[edge].Xeint[0:2,1])])  # mean point on interface
             Xtest = Xintmean + 3*ntest  # physical point on which to test if outside of computational domain 
             
             # CHECK IF TEST POINT IS OUTSIDE COMPUTATIONAL DOMAIN
@@ -286,7 +297,7 @@ class Element:
         for interf in range(self.Neint):  # IN ALL CASES THIS IS ALWAYS GONNA BE 1 ITERATION, BECAUSE FOR CUT ELEMENTS THE INTERFACE IS APPROXIMATED USING A SINGLE SEGMENT
             if self.ElType == 1:  # TRIANGULAR ELEMENT
                 # MODIFIED NODAL MATRIX AND CONECTIVITIES, ACCOUNTING FOR 3 SUBTRIANGLES 
-                XeTESS = np.concatenate((self.Xe[:self.numvertices,:],self.InterEdges[interf].Xeint),axis=0)
+                XeTESS = np.concatenate((self.Xe[:self.numvertices,:],self.InterEdges[interf].Xeint[0:2,:]),axis=0)
                 TeTESS = np.zeros([3,3],dtype=int)
                 
                 # LOOK FOR COMMON NODE BY USING SIGN OF prod(LSe)
@@ -325,7 +336,7 @@ class Element:
                 
             elif self.ElType == 2:  # QUADRILATERAL ELEMENT
                 # MODIFIED NODAL MATRIX
-                XeTESS = np.concatenate((self.Xe[:self.numvertices,:],self.InterEdges[interf].Xeint),axis=0)
+                XeTESS = np.concatenate((self.Xe[:self.numvertices,:],self.InterEdges[interf].Xeint[0:2,:]),axis=0)
                 # LOOK FOR TESSELLATION CONFIGURATION BY USING SIGN OF prod(LSe)
                 #  -> IF prod(LSe) > 0, THEN CUT SPLITS PARENT QUADRILATERAL ELEMENT INTO 2 CHILD QUADRILATERAL ELEMENTS LS > 0
                 #  -> IF prod(LSe) < 0, THEN CUT SPLITS PARENT QUADRILATERAL ELEMENT INTO PENTAGON AND TRIANGLE
@@ -528,7 +539,7 @@ class Element:
         #       - THE STANDARD PHYSICAL GAUSS INTEGRATION NODES MAPPED FROM THE REFERENCE ELEMENT
           
         # COMPUTE MAPPED GAUSS NODES
-        self.Xg2D = self.N @ self.Xe
+        self.Xg2D = self.N @ self.Xe       
         # COMPUTE JACOBIAN INVERSE AND DETERMINANT
         self.invJg = np.zeros([self.Ng2D,self.dim,self.dim])
         self.detJg = np.zeros([self.Ng2D])
@@ -557,7 +568,7 @@ class Element:
         XIg1D, Wg1D, Ng1D = GaussQuadrature(0,Order)
         # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE ->> STANDARD FEM APPROACH
         #### QUADRATURE TO INTEGRATE LINES (1D)
-        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1D, 0, Order-1, self.nedge)
+        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1D, 0, self.nedge-1, self.nedge)
         
         # PRECOMPUTE THE NECESSARY INTEGRATION ENTITIES EVALUATED AT THE STANDARD GAUSS INTEGRATION NODES ->> STANDARD FEM APPROACH
         # WE COMPUTE THUS:
@@ -570,8 +581,8 @@ class Element:
             self.InterEdges[edge].detJgint = np.zeros([self.InterEdges[edge].Ngaussint])
             
             # IDENTIFY EDGE ON REFERENCE ELEMENT CORRESPONDING TO VACUUM VESSEL FIRST WALL EDGE
-            XIeint = np.zeros(np.shape(self.InterEdges[edge].Xeint[:,:]))
-            for i in range(2):
+            XIeint = np.zeros(np.shape(self.InterEdges[edge].Xeint))
+            for i in range(self.InterEdges[edge].nedge):
                 XIeint[i,:] = self.InverseMapping(self.InterEdges[edge].Xeint[i,:])
             # MAP 1D REFERENCE STANDARD GAUSS INTEGRATION NODES ON REFERENCE VACUUM VESSEL FIRST WALL EDGE 
             self.InterEdges[edge].XIgint = N1D @ XIeint
@@ -647,7 +658,7 @@ class Element:
         ######### MODIFIED QUADRATURE TO INTEGRATE OVER SUBELEMENTS
         # 1. MAP THE PHYSICAL INTERFACE ON THE REFERENCE ELEMENT
         self.XIeint = np.zeros(np.shape(self.InterEdges[0].Xeint))
-        for i in range(2):
+        for i in range(self.InterEdges[0].nedge):
             self.XIeint[i,:] = self.InverseMapping(self.InterEdges[0].Xeint[i,:])
             
         # 2. DO TESSELLATION ON REFERENCE ELEMENT
@@ -680,7 +691,7 @@ class Element:
         #### STANDARD REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
         XIg1DFEM, Wg1D, Ng1D = GaussQuadrature(0,Order)
         #### QUADRATURE TO INTEGRATE LINES (1D)
-        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1DFEM, 0, Order-1, 2)
+        N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1DFEM, 0, self.nedge-1, self.nedge)
                 
         for edge in range(self.Neint):
             self.InterEdges[edge].Ngaussint = Ng1D
