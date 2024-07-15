@@ -773,8 +773,8 @@ class GradShafranovCutFEM:
     
         if self.PLASMA_BOUNDARY == 'FREE':
             
-            print(' ')
-            print('gamma = ',self.gamma)
+            #print(' ')
+            #print('gamma = ',self.gamma)
             
             k = 0
             # COMPUTE PHI_B VALUE ON EACH VACUUM VESSEL ELEMENT FIRST WALL INTERFACE INTEGRATION POINTS
@@ -784,13 +784,13 @@ class GradShafranovCutFEM:
                         # ISOLATE NODAL COORDINATES
                         Xnode = self.Elements[element].InterEdges[edge].Xgint[point,:]
                         
-                        print(element,edge,point,Xnode)
+                        #print(element,edge,point,Xnode)
                         
                         # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
                         for icoil in range(self.Ncoils): 
                             PHI_B[k] += self.mu0 * GreenFunction(Xnode,self.Xcoils[icoil,:]) * self.Icoils[icoil]
                             
-                        print(PHI_B[k])
+                        #print(PHI_B[k])
                 
                         # CONTRIBUTION FROM EXTERNAL SOLENOIDS CURRENT  ->>  INTEGRATE OVER SOLENOID LENGTH 
                         for isole in range(self.Nsolenoids):
@@ -806,7 +806,7 @@ class GradShafranovCutFEM:
                                 for l in range(self.nsole):
                                     PHI_B[k] += self.mu0 * GreenFunction(Xnode,Xgsole) * Jsole * self.N1D[ig,l] * detJ1D * self.Wg1D[ig]
                                     
-                        print(PHI_B[k])
+                        #print(PHI_B[k])
                     
                         # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
                         #   1. INTEGRATE IN PLASMA ELEMENTS
@@ -821,7 +821,7 @@ class GradShafranovCutFEM:
                                     PHI_B[k] += self.mu0 * GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
                                                                             PHIg[ig])*ELEMENT.N[ig,l]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]*self.gamma
                                     
-                        print(PHI_B[k])
+                        #print(PHI_B[k])
                                     
                         #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
                         for elem in self.PlasmaBoundElems:
@@ -838,7 +838,7 @@ class GradShafranovCutFEM:
                                             PHI_B[k] += self.mu0 * GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
                                                                     PHIg[ig])*SUBELEM.N[ig,l]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*self.gamma   
                         
-                        print(PHI_B[k])
+                        #print(PHI_B[k])
                         
                         k += 1
         return PHI_B
@@ -1201,29 +1201,29 @@ class GradShafranovCutFEM:
             # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
             PHIg = ELEMENT.N @ ELEMENT.PHIe
             
-            print(ELEMENT.index)
+            """print(ELEMENT.index)
             print(ELEMENT.N)
             print(ELEMENT.Wg2D)
             print(ELEMENT.PHIe)
             print(PHIg)
-            print("ALL GOOD UP TO HERE")
+            print("ALL GOOD UP TO HERE")"""
             
             # LOOP OVER ELEMENTAL NODES
             for i in range(ELEMENT.n):
                  # LOOP OVER GAUSS NODES
                 for ig in range(ELEMENT.Ng2D):
                     
-                    if i == 0:
+                    """if i == 0:
                         print(ELEMENT.Xg2D[ig,:])
                         print('Jphi'+str(ig)+' = ',self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig]))
-                        print('detJ'+str(ig)+' = ',ELEMENT.detJg[ig])
+                        print('detJ'+str(ig)+' = ',ELEMENT.detJg[ig])"""
                     
                     Tcurrent += self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])*ELEMENT.N[ig,i]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]
                     
-                    print(Tcurrent)
+                    #print(Tcurrent)
                     
         # INTEGRATE OVER INTERFACE ELEMENTS, FOR SUBELEMENTS INSIDE PLASMA REGION
-        print("PLASMA SUBELEMENTS")
+        #print("PLASMA SUBELEMENTS")
         for elem in self.PlasmaBoundElems:
             # ISOLATE ELEMENT
             ELEMENT = self.Elements[elem]
