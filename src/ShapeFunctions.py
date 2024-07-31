@@ -102,7 +102,56 @@ def ShapeFunctionsReference(X, elemType, elemOrder, node):
                             N = 4*xi*(1-(xi+eta))
                             dNdxi = 4*(1-2*xi-eta)
                             dNdeta = -4*xi
-
+                case 3:
+                    #  2
+                    # | \
+                    # 6  5 
+                    # |   \
+                    # 7 10 4
+                    # |     \
+                    # 3-8--9-1
+                    match node:
+                        case 1:
+                            N = (9/2)*(1/3-xi)*(2/3-xi)*xi
+                            dNdxi = -(9/2)*((2/3-xi)*xi+(1/3-xi)*xi-(1/3-xi)*(2/3-xi))
+                            dNdeta = 0
+                        case 2:
+                            N = (9/2)*(1/3-eta)*(2/3-eta)*eta 
+                            dNdxi = 0
+                            dNdeta = -(9/2)*((2/3-eta)*eta+(1/3-eta)*eta-(1/3-eta)*(2/3-eta))
+                        case 3:
+                            N = (9/2)*(1-xi-eta)*(2/3-xi-eta)*(1/3-xi-eta)  
+                            dNdxi = -(9/2)*((1-xi-eta)*(2/3-xi-eta)+(1-xi-eta)*(1/3-xi-eta)+(2/3-xi-eta)*(1/3-xi-eta))
+                            dNdeta = -(9/2)*((1-xi-eta)*(2/3-xi-eta)+(1-xi-eta)*(1/3-xi-eta)+(2/3-xi-eta)*(1/3-xi-eta))
+                        case 4:
+                            N = -3*(9/2)*(1/3-xi)*xi*eta
+                            dNdxi = -3*(9/2)*((1/3-xi)*eta-xi*eta)
+                            dNdeta = -3*(9/2)*((1/3-xi)*xi)
+                        case 5:
+                            N = -3*(9/2)*xi*(1/3-eta)*eta 
+                            dNdxi = -3*(9/2)*((1/3-eta)*eta)
+                            dNdeta = -3*(9/2)*((1/3-eta)*xi-xi*eta)
+                        case 6:
+                            N = -3*(9/2)*(1-xi-eta)*(1/3-eta)*eta
+                            dNdxi = 3*(9/2)*((1/3-eta)*eta)
+                            dNdeta = -3*(9/2)*(-(1/3-eta)*eta-(1-xi-eta)*eta+(1-xi-eta)*(1/3-eta))
+                        case 7:
+                            N = 3*(9/2)*(1-xi-eta)*(2/3-xi-eta)*eta
+                            dNdxi = 3*(9/2)*(-(1-xi-eta)*eta-(2/3-xi-eta)*eta)
+                            dNdeta = 3*(9/2)*(-(1-xi-eta)*eta-(2/3-xi-eta)*eta+(1-xi-eta)*(2/3-xi-eta))
+                        case 8:
+                            N = 3*(9/2)*(1-xi-eta)*(2/3-xi-eta)*xi 
+                            dNdxi = 3*(9/2)*((1-xi-eta)*(2/3-xi-eta)-(1-xi-eta)*xi-(2/3-xi-eta)*xi)
+                            dNdeta = 3*(9/2)*(-(1-xi-eta)*xi-(2/3-xi-eta)*xi)
+                        case 9:
+                            N = -3*(9/2)*(1-xi-eta)*(1/3-xi)*xi 
+                            dNdxi = -3*(9/2)*((1-xi-eta)*(1/3-xi)-(1-xi-eta)*xi-(1/3-xi)*xi)
+                            dNdeta = -3*(9/2)*(-(1/3-xi)*xi)
+                        case 10:
+                            N = 6*(9/2)*(1-xi-eta)*xi*eta
+                            dNdxi = 6*(9/2)*((1-xi-eta)*eta-xi*eta)
+                            dNdeta = 6*(9/2)*((1-xi-eta)*xi-xi*eta)
+                            
         case 2:    # QUADRILATERAL
             xi = X[0]
             eta = X[1]
@@ -314,11 +363,12 @@ def Jacobian(x,y,dNdxi,dNdeta):
     J = np.zeros([2,2])
     # COMPUTE JACOBIAN
     for i in range(n):
-        J += np.array([[x[i]*dNdxi[i], y[i]*dNdxi[i]] ,[x[i]*dNdeta[i], y[i]*dNdeta[i]]])
+        J += np.array([[x[i]*dNdxi[i], y[i]*dNdxi[i]] ,
+                       [x[i]*dNdeta[i], y[i]*dNdeta[i]]])
         # COMPUTE INVERSE MATRIX AND JACOBIAN
     invJ = np.linalg.inv(J)
     detJ = np.linalg.det(J)
-    return invJ, detJ
+    return J, invJ, detJ
 
 
 def Jacobian1D(x,y,dNdxi):

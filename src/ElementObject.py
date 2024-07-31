@@ -35,6 +35,7 @@ class Element:
         self.dNdxi = None           # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO XI EVALUATED AT STANDARD 2D GAUSS INTEGRATION NODES
         self.dNdeta = None          # REFERENCE 2D SHAPE FUNCTIONS DERIVATIVES RESPECT TO ETA EVALUATED AT STANDARD 2D GAUSS INTEGRATION NODES
         self.Xg2D = None            # PHYSICAL GAUSS INTEGRATION NODES MAPPED FROM 2D REFERENCE ELEMENT
+        self.Jg = None
         self.invJg = None           # INVERSE MATRIX OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT, EVALUATED AT GAUSS INTEGRATION NODES
         self.detJg = None           # MATRIX DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 2D REFERENCE ELEMENT TO 2D PHYSICAL ELEMENT, EVALUATED AT GAUSS INTEGRATION NODES 
         
@@ -454,7 +455,7 @@ class Element:
             if distance[0] < distance[1]:
                 TeTESS[1,:] = [edgenode[0],edgenode[1],3]
                 TeTESS[2,:] = [edgenode[1],3,4]
-            if distance[0] >= distance[1]:
+            else:
                 TeTESS[1,:] = [edgenode[1],edgenode[0],4]
                 TeTESS[2,:] = [edgenode[0],3,4]
             
@@ -541,11 +542,12 @@ class Element:
         # COMPUTE MAPPED GAUSS NODES
         self.Xg2D = self.N @ self.Xe       
         # COMPUTE JACOBIAN INVERSE AND DETERMINANT
+        self.Jg = np.zeros([self.Ng2D,self.dim,self.dim])
         self.invJg = np.zeros([self.Ng2D,self.dim,self.dim])
         self.detJg = np.zeros([self.Ng2D])
         Rmean = np.sum(self.Xe[:,0])/self.n   # mean elemental radial position
         for ig in range(self.Ng2D):
-            self.invJg[ig,:,:], self.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],self.dNdxi[ig,:],self.dNdeta[ig,:])
+            self.Jg[ig,:,:], self.invJg[ig,:,:], self.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],self.dNdxi[ig,:],self.dNdeta[ig,:])
             self.detJg[ig] *= 2*np.pi*Rmean   # ACCOUNT FOR AXISYMMETRICAL
             
         return    
@@ -662,7 +664,7 @@ class Element:
             self.XIeint[i,:] = self.InverseMapping(self.InterEdges[0].Xeint[i,:])
             
         # 2. DO TESSELLATION ON REFERENCE ELEMENT
-        self.XIeTESS, self.TeTESSREF = self.ReferenceElementTessellation(self.XIeint)
+        self.XIeTESS, self.TeTESSREF = self.ReferenceElementTessellation(self.XIeint[0:2,:])
         
         # 3. MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS AND EVALUATE INTEGRATION ENTITIES ON THEM
         for i, subelem in enumerate(self.SubElements):
@@ -679,12 +681,13 @@ class Element:
             subelem.Xg2D = subelem.N @ self.Xe
             
             # EVALUATE INTEGRATION ENTITIES (JACOBIAN INVERSE MATRIX AND DETERMINANT) ON MODIFIED QUADRATURES NODES
+            subelem.Jg = np.zeros([subelem.Ng2D,subelem.dim,subelem.dim])
             subelem.invJg = np.zeros([subelem.Ng2D,subelem.dim,subelem.dim])
             subelem.detJg = np.zeros([subelem.Ng2D])
             Rmeansub = np.sum(subelem.Xe[:,0])/subelem.n   # mean subelemental radial position
             for ig in range(subelem.Ng2D):
                 #subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(subelem.Xe[:,0],subelem.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])
-                subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])   #### MIRAR ESTO EN FORTRAN !!
+                subelem.Jg[ig,:,:], subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])   #### MIRAR ESTO EN FORTRAN !!
                 subelem.detJg[ig] *= 2*np.pi*Rmeansub   # ACCOUNT FOR AXISYMMETRICAL
                 
         ######### MODIFIED QUADRATURE TO INTEGRATE OVER ELEMENTAL INTERFACES
@@ -715,11 +718,14 @@ class Element:
     ################################ ELEMENTAL INTEGRATION ###########################################
     ##################################################################################################
     
-    def IntegrateElementalDomainTerms(self,SourceTermg,LHS,RHS):
+    def IntegrateElementalDomainTerms(self,SourceTermg):
         """ Input: - SourceTermg: source term (plasma current) evaluated at physical gauss integration nodes
                    - LHS: global system Left-Hand-Side matrix 
                    - RHS: global system Reft-Hand-Side vector
                     """
+                    
+        LHSe = np.zeros([len(self.Te),len(self.Te)])
+        RHSe = np.zeros([len(self.Te)])
         
         # LOOP OVER GAUSS INTEGRATION NODES
         for ig in range(self.Ng2D):  
@@ -730,20 +736,24 @@ class Element:
                 for j in range(len(self.Te)):   # COLUMNS ELEMENTAL MATRIX
                     # COMPUTE LHS MATRIX TERMS
                     ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
-                    LHS[self.Te[i],self.Te[j]] -= np.transpose((self.invJg[ig,:,:]@Ngrad[:,i]))@(self.invJg[ig,:,:]@Ngrad[:,j])*self.detJg[ig]*self.Wg2D[ig]
+                    LHSe[i,j] -= (self.invJg[ig,:,:]@Ngrad[:,i])@(self.invJg[ig,:,:]@Ngrad[:,j])*self.detJg[ig]*self.Wg2D[ig]
                     ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                    LHS[self.Te[i],self.Te[j]] -= (1/self.Xg2D[ig,0])*self.N[ig,j] * (self.invJg[ig,0,:]@Ngrad[:,i])*self.detJg[ig]*self.Wg2D[ig]
+                    LHSe[i,j] -= (1/self.Xg2D[ig,0])*self.N[ig,j] * (self.invJg[ig,0,:]@Ngrad[:,i])*self.detJg[ig]*self.Wg2D[ig]
                 # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
-                RHS[self.Te[i]] += SourceTermg[ig] * self.N[ig,i] *self.detJg[ig]*self.Wg2D[ig]
-        return 
+                RHSe[i] += SourceTermg[ig] * self.N[ig,i] *self.detJg[ig]*self.Wg2D[ig]
+                
+        return LHSe, RHSe
     
     
-    def IntegrateElementalInterfaceTerms(self,beta,LHS,RHS):
+    def IntegrateElementalInterfaceTerms(self,beta):
         """ Input: - PHI_g: Interface condition, evaluated at physical gauss integration nodes
                    - beta: Nitsche's method penalty parameter
                    - LHS: global system Left-Hand-Side matrix 
                    - RHS: global system Reft-Hand-Side vector 
                     """
+                    
+        LHSe = np.zeros([len(self.Te),len(self.Te)])
+        RHSe = np.zeros([len(self.Te)])
     
         # LOOP OVER EDGES ON COMPUTATIONAL DOMAIN'S BOUNDARY
         for edge in range(self.Neint):
@@ -758,17 +768,18 @@ class Element:
                     for j in range(len(self.Te)):  # COLUMNS ELEMENTAL MATRIX
                         # COMPUTE LHS MATRIX TERMS
                         ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
-                        LHS[self.Te[i],self.Te[j]] += EDGE.Nint[ig,i] * EDGE.NormalVec @ Ngrad[:,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+                        LHSe[i,j] += EDGE.Nint[ig,i] * EDGE.NormalVec @ Ngrad[:,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                         ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
-                        LHS[self.Te[i],self.Te[j]] += EDGE.NormalVec @ Ngrad[:,i]*(EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig])
+                        LHSe[i,j] += EDGE.NormalVec @ Ngrad[:,i]*(EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig])
                         ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
-                        LHS[self.Te[i],self.Te[j]] += beta * EDGE.Nint[ig,i] * EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+                        LHSe[i,j] += beta * EDGE.Nint[ig,i] * EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                     # COMPUTE RHS VECTOR TERMS 
                     ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
-                    RHS[self.Te[i]] +=  EDGE.PHI_g[ig] * EDGE.NormalVec @ Ngrad[:,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+                    RHSe[i] +=  EDGE.PHI_g[ig] * EDGE.NormalVec @ Ngrad[:,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                     ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
-                    RHS[self.Te[i]] +=  beta * EDGE.PHI_g[ig] * EDGE.Nint[ig,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
-        return 
+                    RHSe[i] +=  beta * EDGE.PHI_g[ig] * EDGE.Nint[ig,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+        
+        return LHSe, RHSe
     
     
     ##################################################################################################

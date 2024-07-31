@@ -66,27 +66,27 @@ $$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
    Rposi:   1.696
    Zlow:    -5.415
    Zup:     -3.6067
-   Inten:   5300000
+   Inten:   5300000.0
 
    Rposi:   1.696
    Zlow:    -3.6067
    Zup:     -1.7983
-   Inten:   -10300000
+   Inten:   -10300000.0
 
    Rposi:   1.696
    Zlow:    -1.7983
    Zup:     1.8183
-   Inten:   -20800000
+   Inten:   -20800000.0
 
    Rposi:   1.696
    Zlow:    1.8183
    Zup:     3.6267
-   Inten:   -4050000
+   Inten:   -4050000.0
 
    Rposi:   1.696
    Zlow:    3.6267
    Zup:     5.435
-   Inten:   -4820000
+   Inten:   -4820000.0
 
   PROPERTIES: 1
   MASS_DENSITY_1: 1.0

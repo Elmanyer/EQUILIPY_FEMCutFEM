@@ -138,6 +138,11 @@ class GradShafranovCutFEM:
         self.coeffs1W = []                       # TOKAMAK FIRST WALL LEVEL-0 CONTOUR COEFFICIENTS (LINEAR PLASMA MODEL CASE SOLUTION)
         self.nsole = 2                           # NUMBER OF NODES ON SOLENOID ELEMENT
         
+        self.output_file = None
+        self.ELMAT_file = None
+        self.ELMAT_output = False
+        self.GlobalSystem_output = False
+        
         return
     
     def print_all_attributes(self):
@@ -422,12 +427,6 @@ class GradShafranovCutFEM:
             # COMPUTE PRESSURE PROFILE FACTOR
             self.P0=self.B0*((self.kappa**2)+1)/(self.mu0*(self.R0**2)*self.q0*self.kappa)
             
-            """print('B0 = ',self.B0)
-            print(self.kappa)
-            print(self.R0)
-            print(self.q0)
-            print(self.P0)"""
-            
         # PREPARE MATRICES FOR STORING ALL RESULTS
         self.PHI_NORM_ALL = np.zeros([self.Nn, self.INT_ITER*self.EXT_ITER])
         self.PHI_crit_ALL = np.zeros([2, 3, self.INT_ITER*self.EXT_ITER])   # dim0 = 2 -> LOCAL EXTREMUM AND SADDLE POINT;  dim1 = 3 -> [PHI_crit_val, x_crit, y_crit]
@@ -504,12 +503,6 @@ class GradShafranovCutFEM:
         elif self.PLASMA_CURRENT == "PROFILES":
             ## OPTION WITH GAMMA APPLIED TO funG AND WITHOUT denom
             jphi = -R * self.dPdphi(PHI) - 0.5*self.dG2dphi(PHI)/ (R*self.mu0)
-            
-            """print(self.P0)
-            print(R,Z, PHI)
-            print(self.dPdphi(PHI))
-            print(self.dG2dphi(PHI))
-            print(jphi)"""
             
         return jphi
     
@@ -773,9 +766,6 @@ class GradShafranovCutFEM:
     
         if self.PLASMA_BOUNDARY == 'FREE':
             
-            #print(' ')
-            #print('gamma = ',self.gamma)
-            
             k = 0
             # COMPUTE PHI_B VALUE ON EACH VACUUM VESSEL ELEMENT FIRST WALL INTERFACE INTEGRATION POINTS
             for element in self.VacVessWallElems:
@@ -784,14 +774,10 @@ class GradShafranovCutFEM:
                         # ISOLATE NODAL COORDINATES
                         Xnode = self.Elements[element].InterEdges[edge].Xgint[point,:]
                         
-                        #print(element,edge,point,Xnode)
-                        
                         # CONTRIBUTION FROM EXTERNAL COILS CURRENT 
                         for icoil in range(self.Ncoils): 
                             PHI_B[k] += self.mu0 * GreenFunction(Xnode,self.Xcoils[icoil,:]) * self.Icoils[icoil]
-                            
-                        #print(PHI_B[k])
-                
+                        
                         # CONTRIBUTION FROM EXTERNAL SOLENOIDS CURRENT  ->>  INTEGRATE OVER SOLENOID LENGTH 
                         for isole in range(self.Nsolenoids):
                             Xsole = np.array([[self.Xsolenoids[isole,0], self.Xsolenoids[isole,1]],[self.Xsolenoids[isole,0], self.Xsolenoids[isole,2]]])   # COORDINATES OF SOLENOID EDGES
@@ -806,8 +792,6 @@ class GradShafranovCutFEM:
                                 for l in range(self.nsole):
                                     PHI_B[k] += self.mu0 * GreenFunction(Xnode,Xgsole) * Jsole * self.N1D[ig,l] * detJ1D * self.Wg1D[ig]
                                     
-                        #print(PHI_B[k])
-                    
                         # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
                         #   1. INTEGRATE IN PLASMA ELEMENTS
                         for elem in self.PlasmaElems:
@@ -820,9 +804,7 @@ class GradShafranovCutFEM:
                                 for l in range(ELEMENT.n):
                                     PHI_B[k] += self.mu0 * GreenFunction(Xnode, ELEMENT.Xg2D[ig,:])*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],
                                                                             PHIg[ig])*ELEMENT.N[ig,l]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]*self.gamma
-                                    
-                        #print(PHI_B[k])
-                                    
+                                              
                         #   2. INTEGRATE IN CUT ELEMENTS, OVER SUBELEMENT IN PLASMA REGION
                         for elem in self.PlasmaBoundElems:
                             # ISOLATE ELEMENT OBJECT
@@ -837,9 +819,6 @@ class GradShafranovCutFEM:
                                         for l in range(SUBELEM.n):
                                             PHI_B[k] += self.mu0 * GreenFunction(Xnode, SUBELEM.Xg2D[ig,:])*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],
                                                                     PHIg[ig])*SUBELEM.N[ig,l]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]*self.gamma   
-                        
-                        #print(PHI_B[k])
-                        
                         k += 1
         return PHI_B
     
@@ -1060,73 +1039,6 @@ class GradShafranovCutFEM:
         dr = (rfine[-1]-rfine[0])/Mr
         dz = (zfine[-1]-zfine[0])/Mz
         gradPHIfine = np.gradient(PHIfine,dr,dz)
-
-        """
-        # 3. FIND SOLUTION OF  GRAD(PHI) = 0   NEAR MAGNETIC AXIS AND SADDLE POINT 
-        Nr = 2
-        Nz = 2
-        # EXPLORATION ZONE 1 (LOOKING FOR MAGNETIC AXIS LOCAL EXTREMUM)
-        rA0 = np.linspace(self.R0-0.5,self.R0+0.5,Nr)
-        zA0 = np.linspace(-0.5,0.5,Nz)
-        # EXPLORATION ZONE 2 (LOOKING FOR SADDLE POINT)
-        rA1 = np.linspace(4,5,Nr)
-        zA1 = np.linspace(-5,-4,Nz)
-
-        Xcritvec = np.zeros([(Nr*Nz)*2,2])
-        i = 0
-        # EXPLORE ZONE 1
-        for r0 in rA0:
-            for z0 in zA0:
-                X0 = np.array([r0,z0])
-                sol = optimize.root(gradPHI, X0, args=(Rfine,Zfine,gradPHIfine))
-                if sol.success == True:
-                    Xcritvec[i,:] = sol.x
-                    i += 1
-        # EXPLOR ZONE 2
-        for r0 in rA1:
-            for z0 in zA1:
-                X0 = np.array([r0,z0])
-                sol = optimize.root(gradPHI, X0, args=(Rfine,Zfine,gradPHIfine))
-                if sol.success == True:
-                    Xcritvec[i,:] = sol.x
-                    i += 1
-                    
-        Xcritvec = Xcritvec[:i,:]
-        
-        # DISCARD SIMILAR SOLUTIONS:
-        # Round each value in the array to the fourth decimal place
-        Xcritvec_rounded = np.round(Xcritvec, decimals=4)
-        # Convert each row to a tuple and create a set to remove duplicates
-        Xcritvec_final = {tuple(row) for row in Xcritvec_rounded}
-        # Convert the set back to a NumPy array
-        Xcritvec_final = np.array(list(Xcritvec_final))
-        
-        # 4. CHECK HESSIAN -> Caracterise critical point
-        self.Xcrit = np.zeros([len(Xcritvec_final[:,0]),3])
-        for i in range(len(Xcritvec_final[:,0])):
-            self.Xcrit[i,:2] = Xcritvec_final[i,:]
-            nature = EvaluateHESSIAN(Xcritvec_final[i,:], gradPHIfine, Rfine, Zfine, dr, dz)
-            if nature == "LOCAL EXTREMUM":
-                self.Xcrit[i,-1] = 1
-            elif nature == "SADDLE POINT":
-                self.Xcrit[i,-1] = -1
-        
-        # 5. INTERPOLATE VALUE OF PHI AT CRITICAL POINT
-        for i in range(len(self.Xcrit[:,0])):
-            if self.Xcrit[i,-1] == 1:  # LOCAL EXTREMUM ON MAGNETIC AXIS 
-                # LOOK FOR ELEMENT CONTAINING LOCAL EXTREMUM
-                elem = SearchElement(self.Elements,self.Xcrit[i,:2],self.PlasmaElems)
-                # INTERPOLATE PHI VALUE ON CRITICAL POINT
-                self.PHI_0 = self.Elements[elem].ElementalInterpolation(self.Xcrit[i,:],PHI[self.Elements[elem].Te]) 
-            elif self.Xcrit[i,-1] == -1:   # SADDLE POINT
-                # LOOK FOR ELEMENT CONTAINING LOCAL EXTREMUM
-                elem = SearchElement(self.Elements,self.Xcrit[i,:2],np.concatenate((self.VacuumElems,self.VacVessWallElems),axis=0))
-                # INTERPOLATE PHI VALUE ON CRITICAL POINT
-                self.PHI_X = self.Elements[elem].ElementalInterpolation(self.Xcrit[i,:],PHI[self.Elements[elem].Te]) 
-                
-        if self.PLASMA_BOUNDARY == "FIXED":
-            self.PHI_X = 0
-        """
         
         # FIND SOLUTION OF  GRAD(PHI) = 0   NEAR MAGNETIC AXIS AND SADDLE POINT 
         if self.it == 1:
@@ -1141,39 +1053,44 @@ class GradShafranovCutFEM:
         sol = optimize.root(gradPHI, X0_extr, args=(Rfine,Zfine,gradPHIfine))
         if sol.success == True:
             self.Xcrit[1,0,:-1] = sol.x
+            # 4. CHECK HESSIAN LOCAL EXTREMUM
+            # LOCAL EXTREMUM
+            nature = EvaluateHESSIAN(self.Xcrit[1,0,:-1], gradPHIfine, Rfine, Zfine, dr, dz)
+            if nature != "LOCAL EXTREMUM":
+                print("ERROR IN LOCAL EXTREMUM HESSIAN")
+            # 5. INTERPOLATE VALUE OF PHI AT LOCAL EXTREMUM
+            # LOOK FOR ELEMENT CONTAINING LOCAL EXTREMUM
+            elem = self.SearchElement(self.Xcrit[1,0,:-1],self.PlasmaElems)
+            self.Xcrit[1,0,-1] = elem
         else:
-            raise Exception("LOCAL EXTREMUM NOT FOUND")
-        # 4. CHECK HESSIAN LOCAL EXTREMUM
-        # LOCAL EXTREMUM
-        nature = EvaluateHESSIAN(self.Xcrit[1,0,:-1], gradPHIfine, Rfine, Zfine, dr, dz)
-        if nature != "LOCAL EXTREMUM":
-            print("ERROR IN LOCAL EXTREMUM HESSIAN")
-        # 5. INTERPOLATE VALUE OF PHI AT LOCAL EXTREMUM
-        # LOOK FOR ELEMENT CONTAINING LOCAL EXTREMUM
-        elem = self.SearchElement(self.Xcrit[1,0,:-1],self.PlasmaElems)
-        self.Xcrit[1,0,-1] = elem
+            print("LOCAL EXTREMUM NOT FOUND. TAKING PREVIOUS SOLUTION")
+            self.Xcrit[1,0,:] = self.Xcrit[0,0,:]
+            
         # INTERPOLATE PHI VALUE ON CRITICAL POINT
-        self.PHI_0 = self.Elements[elem].ElementalInterpolation(self.Xcrit[1,0,:-1],PHI[self.Elements[elem].Te]) 
-        print('LOCAL EXTREMUM AT ',self.Xcrit[1,0,:-1],' (ELEMENT ', elem,') WITH VALUE PHI_0 = ',self.PHI_0)
+        self.PHI_0 = self.Elements[int(self.Xcrit[1,0,-1])].ElementalInterpolation(self.Xcrit[1,0,:-1],PHI[self.Elements[int(self.Xcrit[1,0,-1])].Te]) 
+        print('LOCAL EXTREMUM AT ',self.Xcrit[1,0,:-1],' (ELEMENT ', int(self.Xcrit[1,0,-1]),') WITH VALUE PHI_0 = ',self.PHI_0)
             
         if self.PLASMA_BOUNDARY == "FREE":
             # 3. LOOK FOR SADDLE POINT
             sol = optimize.root(gradPHI, X0_saddle, args=(Rfine,Zfine,gradPHIfine))
             if sol.success == True:
-                self.Xcrit[1,1,:-1] = sol.x
+                self.Xcrit[1,1,:-1] = sol.x 
+                # 4. CHECK HESSIAN SADDLE POINT
+                nature = EvaluateHESSIAN(self.Xcrit[1,1,:-1], gradPHIfine, Rfine, Zfine, dr, dz)
+                if nature != "SADDLE POINT":
+                    print("ERROR IN SADDLE POINT HESSIAN")
+                # 5. INTERPOLATE VALUE OF PHI AT SADDLE POINT
+                # LOOK FOR ELEMENT CONTAINING SADDLE POINT
+                elem = self.SearchElement(self.Xcrit[1,1,:-1],np.concatenate((self.VacuumElems,self.PlasmaBoundElems,self.PlasmaElems),axis=0))
+                self.Xcrit[1,1,-1] = elem
             else:
-                raise Exception("SADDLE POINT NOT FOUND")
-            # 4. CHECK HESSIAN SADDLE POINT
-            nature = EvaluateHESSIAN(self.Xcrit[1,1,:-1], gradPHIfine, Rfine, Zfine, dr, dz)
-            if nature != "SADDLE POINT":
-                print("ERROR IN SADDLE POINT HESSIAN")
-            # 5. INTERPOLATE VALUE OF PHI AT SADDLE POINT
-            # LOOK FOR ELEMENT CONTAINING SADDLE POINT
-            elem = self.SearchElement(self.Xcrit[1,1,:-1],np.concatenate((self.VacuumElems,self.PlasmaBoundElems,self.PlasmaElems),axis=0))
-            self.Xcrit[1,1,-1] = elem
+                print("SADDLE POINT NOT FOUND. TAKING PREVIOUS SOLUTION")
+                self.Xcrit[1,1,:] = self.Xcrit[0,1,:]
+                
             # INTERPOLATE PHI VALUE ON CRITICAL POINT
-            self.PHI_X = self.Elements[elem].ElementalInterpolation(self.Xcrit[1,1,:-1],PHI[self.Elements[elem].Te]) 
-            print('SADDLE POINT AT ',self.Xcrit[1,1,:-1],' (ELEMENT ', elem,') WITH VALUE PHI_X = ',self.PHI_X)
+            self.PHI_X = self.Elements[int(self.Xcrit[1,1,-1])].ElementalInterpolation(self.Xcrit[1,1,:-1],PHI[self.Elements[int(self.Xcrit[1,1,-1])].Te]) 
+            print('SADDLE POINT AT ',self.Xcrit[1,1,:-1],' (ELEMENT ', int(self.Xcrit[1,1,-1]),') WITH VALUE PHI_X = ',self.PHI_X)
+        
         else:
             self.Xcrit[1,1,:-1] = [self.Xmin,self.Ymin]
             self.PHI_X = 0
@@ -1185,7 +1102,6 @@ class GradShafranovCutFEM:
         # NORMALISE SOLUTION OBTAINED FROM SOLVING CutFEM SYSTEM OF EQUATIONS USING CRITICAL PHI VALUES, PHI_0 AND PHI_X
         for i in range(self.Nn):
             self.PHI_NORM[i,1] = (self.PHI[i]-self.PHI_X)/np.abs(self.PHI_0-self.PHI_X)
-            
         return 
     
     
@@ -1194,20 +1110,11 @@ class GradShafranovCutFEM:
         
         Tcurrent = 0
         # INTEGRATE OVER PLASMA ELEMENTS
-        #print('PLASMA ELEMENTS')
         for elem in self.PlasmaElems:
             # ISOLATE ELEMENT
             ELEMENT = self.Elements[elem]
             # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
             PHIg = ELEMENT.N @ ELEMENT.PHIe
-            
-            """print(ELEMENT.index)
-            print(ELEMENT.N)
-            print(ELEMENT.Wg2D)
-            print(ELEMENT.PHIe)
-            print(PHIg)
-            print("ALL GOOD UP TO HERE")"""
-            
             # LOOP OVER ELEMENTAL NODES
             for i in range(ELEMENT.n):
                  # LOOP OVER GAUSS NODES
@@ -1220,10 +1127,7 @@ class GradShafranovCutFEM:
                     
                     Tcurrent += self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])*ELEMENT.N[ig,i]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]
                     
-                    #print(Tcurrent)
-                    
         # INTEGRATE OVER INTERFACE ELEMENTS, FOR SUBELEMENTS INSIDE PLASMA REGION
-        #print("PLASMA SUBELEMENTS")
         for elem in self.PlasmaBoundElems:
             # ISOLATE ELEMENT
             ELEMENT = self.Elements[elem]
@@ -1252,46 +1156,6 @@ class GradShafranovCutFEM:
         print("Total plasma current normalization factor = ", self.gamma)
         # COMPUTED NORMALISED TOTAL PLASMA CURRENT
         print("Normalised total plasma current = ", Tcurrent*self.gamma)
-        
-        """Int1 = 0
-        Int2 = 0
-        # INTEGRATE OVER PLASMA ELEMENTS
-        for elem in self.PlasmaElems:
-            # ISOLATE ELEMENT
-            ELEMENT = self.Elements[elem]
-            # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
-            PHIg = ELEMENT.N @ ELEMENT.PHIe
-            # LOOP OVER GAUSS NODES
-            for ig in range(ELEMENT.Ng2D):
-                # LOOP OVER ELEMENTAL NODES
-                for i in range(ELEMENT.n):
-                    Int1 += ELEMENT.Xg2D[ig,0]*(PHIg[ig]**(self.n_p-1))*ELEMENT.N[ig,i]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]
-                    Int2 += ((PHIg[ig]**(self.n_g-1))/ELEMENT.Xg2D[ig,0])*ELEMENT.N[ig,i]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]
-                    
-        # INTEGRATE OVER INTERFACE ELEMENTS, FOR SUBELEMENTS INSIDE PLASMA REGION
-        for elem in self.PlasmaBoundElems:
-            # ISOLATE ELEMENT
-            ELEMENT = self.Elements[elem]
-            # LOOP OVER SUBELEMENTS
-            for SUBELEM in ELEMENT.SubElements:
-                # INTEGRATE IN SUBDOMAIN INSIDE PLASMA REGION
-                if SUBELEM.Dom < 0:
-                    # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
-                    PHIg = SUBELEM.N @ ELEMENT.PHIe
-                    # LOOP OVER GAUSS NODES
-                    for ig in range(SUBELEM.Ng2D):
-                        # LOOP OVER ELEMENTAL NODES
-                        for i in range(SUBELEM.n):
-                            Int1 += SUBELEM.Xg2D[ig,0]*(PHIg[ig]**(self.n_p-1))*SUBELEM.N[ig,i]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]
-                            Int2 += ((PHIg[ig]**(self.n_g-1))/SUBELEM.Xg2D[ig,0])*SUBELEM.N[ig,i]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig]
-        
-        if self.it <= 1:
-            denom = 1
-        else:
-            denom = self.PHI_X - self.PHI_0
-            
-        #self.gamma = -2*self.mu0*(self.TOTAL_CURRENT+self.P0*self.n_p*Int1)/(self.n_g*Int2*self.G0**2)
-        self.gamma = -2*self.mu0*(self.TOTAL_CURRENT*denom+self.P0*self.n_p*Int1)/(self.n_g*Int2*self.G0**2)"""
         
         return
     
@@ -1475,7 +1339,7 @@ class GradShafranovCutFEM:
         
         # COMPUTE INITIAL TOTAL PLASMA CURRENT CORRECTION FACTOR
         if self.PLASMA_CURRENT == "PROFILES":
-            self.gamma = 1
+            #self.gamma = 1
             self.ComputeTotalPlasmaCurrentNormalization()
         
         ####### INITIALISE PHI_B UNKNOWN VECTORS
@@ -1696,8 +1560,17 @@ class GradShafranovCutFEM:
         self.LHS = np.zeros([self.Nn,self.Nn])
         self.RHS = np.zeros([self.Nn, 1])
         
+        # OPEN ELEMENTAL MATRICES OUTPUT FILE
+        if self.ELMAT_output:
+            self.ELMAT_file = open('ElementalMatrices.dat', 'w')
+            self.ELMAT_file.write('ELEMENTAL_MATRICES_FILE\n')
+            self.ELMAT_file.write('NON_CUT_ELEMENTS\n')
+        
         # INTEGRATE OVER THE SURFACE OF ELEMENTS WHICH ARE NOT CUT BY ANY INTERFACE (STANDARD QUADRATURES)
         print("     Integrate over non-cut elements...", end="")
+        
+        #self.output_file.write('NON_CUT_ELEMENTS\n')
+        
         for elem in self.NonCutElems: 
             # ISOLATE ELEMENT 
             ELEMENT = self.Elements[elem]  
@@ -1707,14 +1580,61 @@ class GradShafranovCutFEM:
                 # MAP PHI VALUES FROM ELEMENT NODES TO GAUSS NODES
                 PHIg = ELEMENT.N @ ELEMENT.PHIe
                 for ig in range(self.Elements[elem].Ng2D):
-                    #SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])
-                    SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig])*self.gamma 
+                    SourceTermg[ig] = self.mu0*ELEMENT.Xg2D[ig,0]*self.Jphi(ELEMENT.Xg2D[ig,0],ELEMENT.Xg2D[ig,1],PHIg[ig]) 
             # COMPUTE ELEMENTAL MATRICES
-            ELEMENT.IntegrateElementalDomainTerms(SourceTermg,self.LHS,self.RHS)
+            LHSe, RHSe = ELEMENT.IntegrateElementalDomainTerms(SourceTermg)
+            
+            """self.output_file.write("elem {:d} {:d}\n".format(ELEMENT.index,ELEMENT.Dom))
+            self.output_file.write('Xe\n')
+            np.savetxt(self.output_file,ELEMENT.Xe,delimiter=',',fmt='%e')
+            self.output_file.write('XIg\n')
+            np.savetxt(self.output_file,ELEMENT.XIg2D,delimiter=',',fmt='%e')
+            self.output_file.write('Wg\n')
+            np.savetxt(self.output_file,ELEMENT.Wg2D,delimiter=',',fmt='%e')
+            self.output_file.write('N\n')
+            np.savetxt(self.output_file,ELEMENT.N,delimiter=',',fmt='%e')
+            self.output_file.write('dNdxi\n')
+            np.savetxt(self.output_file,ELEMENT.dNdxi,delimiter=',',fmt='%e')
+            self.output_file.write('dNdeta\n')
+            np.savetxt(self.output_file,ELEMENT.dNdeta,delimiter=',',fmt='%e')
+            self.output_file.write('Xg\n')
+            np.savetxt(self.output_file,ELEMENT.Xg2D,delimiter=',',fmt='%e')
+            self.output_file.write('Jg\n')
+            for ig in range(ELEMENT.Ng2D):
+                np.savetxt(self.output_file,ELEMENT.Jg[ig,:,:],delimiter=',',fmt='%e')
+            self.output_file.write('invJg\n')
+            for ig in range(ELEMENT.Ng2D):
+                np.savetxt(self.output_file,ELEMENT.invJg[ig,:,:],delimiter=',',fmt='%e')
+            self.output_file.write('detJg\n')
+            np.savetxt(self.output_file,ELEMENT.detJg,delimiter=',',fmt='%e')
+            self.output_file.write('source term\n')
+            np.savetxt(self.output_file,SourceTermg,delimiter=',',fmt='%e')"""
+            
+            if self.ELMAT_output:
+                self.ELMAT_file.write("elem {:d} {:d}\n".format(ELEMENT.index,ELEMENT.Dom))
+                self.ELMAT_file.write('elmat\n')
+                np.savetxt(self.ELMAT_file,LHSe,delimiter=',',fmt='%e')
+                self.ELMAT_file.write('elrhs\n')
+                np.savetxt(self.ELMAT_file,RHSe,fmt='%e')
+            
+            # ASSEMBLE ELEMENTAL CONTRIBUTIONS INTO GLOBAL SYSTEM
+            for i in range(ELEMENT.n):   # ROWS ELEMENTAL MATRIX
+                for j in range(ELEMENT.n):   # COLUMNS ELEMENTAL MATRIX
+                    self.LHS[ELEMENT.Te[i],ELEMENT.Te[j]] += LHSe[i,j]
+                self.RHS[ELEMENT.Te[i]] += RHSe[i]
+                
+        #self.output_file.write('END_NON_CUT_ELEMENTS\n')
         print("Done!")
+        
+        if self.ELMAT_output:
+            self.ELMAT_file.write('END_NON_CUT_ELEMENTS\n')
+            self.ELMAT_file.write('CUT_ELEMENTS_SURFACE\n')
         
         # INTEGRATE OVER THE SURFACES OF SUBELEMENTS IN ELEMENTS CUT BY INTERFACES (MODIFIED QUADRATURES)
         print("     Integrate over cut-elements subelements...", end="")
+        
+        #self.output_file.write('CUT_ELEMENTS_SURFACE\n')
+        
         for elem in self.CutElems:
             # ISOLATE ELEMENT 
             ELEMENT = self.Elements[elem]
@@ -1729,28 +1649,184 @@ class GradShafranovCutFEM:
                     # MAPP GAUSS NODAL PHI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
                     PHIg = SUBELEM.N @ ELEMENT.PHIe
                     for ig in range(SUBELEM.Ng2D):
-                        #SourceTermg[ig] = self.mu0*SUBELEM.Xg2D[ig,0]*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])
-                        SourceTermg[ig] = self.mu0*SUBELEM.Xg2D[ig,0]*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])*self.gamma
+                        SourceTermg[ig] = self.mu0*SUBELEM.Xg2D[ig,0]*self.Jphi(SUBELEM.Xg2D[ig,0],SUBELEM.Xg2D[ig,1],PHIg[ig])
                 # COMPUTE ELEMENTAL MATRICES
-                SUBELEM.IntegrateElementalDomainTerms(SourceTermg,self.LHS,self.RHS)
+                LHSe, RHSe = SUBELEM.IntegrateElementalDomainTerms(SourceTermg)
+                
+                """self.output_file.write("elem {:d} {:d} subelem {:d} {:d}\n".format(ELEMENT.index,ELEMENT.Dom,SUBELEM.index,SUBELEM.Dom))
+                self.output_file.write('XeTESS\n')
+                np.savetxt(self.output_file,ELEMENT.XeTESS,delimiter=',',fmt='%e')
+                self.output_file.write('XIeTESS_REF\n')
+                np.savetxt(self.output_file,ELEMENT.XIeTESS,delimiter=',',fmt='%e')
+                self.output_file.write('TeTESS_REF\n')
+                np.savetxt(self.output_file,ELEMENT.TeTESSREF,delimiter=',',fmt='%e')
+                self.output_file.write('Xe\n')
+                np.savetxt(self.output_file,SUBELEM.Xe,delimiter=',',fmt='%e')
+                self.output_file.write('XIg\n')
+                np.savetxt(self.output_file,SUBELEM.XIg2D,delimiter=',',fmt='%e')
+                self.output_file.write('N\n')
+                np.savetxt(self.output_file,SUBELEM.N,delimiter=',',fmt='%e')
+                self.output_file.write('dNdxi\n')
+                np.savetxt(self.output_file,SUBELEM.dNdxi,delimiter=',',fmt='%e')
+                self.output_file.write('dNdeta\n')
+                np.savetxt(self.output_file,SUBELEM.dNdeta,delimiter=',',fmt='%e')
+                self.output_file.write('Xg\n')
+                np.savetxt(self.output_file,SUBELEM.Xg2D,delimiter=',',fmt='%e')
+                self.output_file.write('Jg\n')
+                for ig in range(SUBELEM.Ng2D):
+                    np.savetxt(self.output_file,SUBELEM.Jg[ig,:,:],delimiter=',',fmt='%e')
+                self.output_file.write('invJg\n')
+                for ig in range(SUBELEM.Ng2D):
+                    np.savetxt(self.output_file,SUBELEM.invJg[ig,:,:],delimiter=',',fmt='%e')
+                self.output_file.write('detJg\n')
+                np.savetxt(self.output_file,SUBELEM.detJg,delimiter=',',fmt='%e')
+                self.output_file.write('source term\n')
+                np.savetxt(self.output_file,SourceTermg,delimiter=',',fmt='%e')
+                self.output_file.write('elmat\n')
+                np.savetxt(self.output_file,LHSe,delimiter=',',fmt='%e')
+                self.output_file.write('elrhs\n')
+                np.savetxt(self.output_file,RHSe,fmt='%e')"""
+                
+                if self.ELMAT_output:
+                    self.ELMAT_file.write("elem {:d} {:d} subelem {:d} {:d}\n".format(ELEMENT.index,ELEMENT.Dom,SUBELEM.index,SUBELEM.Dom))
+                    self.ELMAT_file.write('elmat\n')
+                    np.savetxt(self.ELMAT_file,LHSe,delimiter=',',fmt='%e')
+                    self.ELMAT_file.write('elrhs\n')
+                    np.savetxt(self.ELMAT_file,RHSe,fmt='%e')
+                
+                # ASSEMBLE ELEMENTAL CONTRIBUTIONS INTO GLOBAL SYSTEM
+                for i in range(len(SUBELEM.Te)):   # ROWS ELEMENTAL MATRIX
+                    for j in range(len(SUBELEM.Te)):   # COLUMNS ELEMENTAL MATRIX
+                        self.LHS[SUBELEM.Te[i],SUBELEM.Te[j]] += LHSe[i,j]
+                    self.RHS[SUBELEM.Te[i]] += RHSe[i]
+                
+        #self.output_file.write('END_CUT_ELEMENTS_SURFACE\n')
+        
         print("Done!")
         
+        if self.ELMAT_output:
+            self.ELMAT_file.write('END_CUT_ELEMENTS_SURFACE\n')
+            self.ELMAT_file.write('CUT_ELEMENTS_INTERFACE\n')
+        
+        # INTEGRATE OVER THE CUT EDGES IN ELEMENTS CUT BY INTERFACES (MODIFIED QUADRATURES)
         print("     Integrate along cut-elements interface edges...", end="")
+        
+        #self.output_file.write('CUT_ELEMENTS_INTERFACE\n')
+        
         for elem in self.CutElems:
             # ISOLATE ELEMENT 
             ELEMENT = self.Elements[elem]
             # COMPUTE ELEMENTAL MATRICES
-            ELEMENT.IntegrateElementalInterfaceTerms(self.beta,self.LHS,self.RHS)
+            LHSe,RHSe = ELEMENT.IntegrateElementalInterfaceTerms(self.beta)
+            
+            """self.output_file.write("elem {:d} {:d} edge {:d}\n".format(ELEMENT.index,ELEMENT.Dom, ELEMENT.InterEdges[0].int_index))
+            self.output_file.write('Xe\n')
+            np.savetxt(self.output_file,ELEMENT.InterEdges[0].Xeint,delimiter=',',fmt='%e')
+            self.output_file.write('N\n')
+            np.savetxt(self.output_file,ELEMENT.InterEdges[0].Nint,delimiter=',',fmt='%e')
+            self.output_file.write('dNdxi\n')
+            np.savetxt(self.output_file,ELEMENT.InterEdges[0].dNdxiint,delimiter=',',fmt='%e')
+            self.output_file.write('dNdeta\n')
+            np.savetxt(self.output_file,ELEMENT.InterEdges[0].dNdetaint,delimiter=',',fmt='%e')
+            self.output_file.write('Xg\n')
+            np.savetxt(self.output_file,ELEMENT.InterEdges[0].Xgint,delimiter=',',fmt='%e')
+            self.output_file.write('detJg\n')
+            np.savetxt(self.output_file,ELEMENT.InterEdges[0].detJgint,delimiter=',',fmt='%e')
+            self.output_file.write('elmat\n')
+            np.savetxt(self.output_file,LHSe,delimiter=',',fmt='%e')
+            self.output_file.write('elrhs\n')
+            np.savetxt(self.output_file,RHSe,fmt='%e')"""
+            
+            if self.ELMAT_output:
+                self.ELMAT_file.write("elem {:d} {:d}\n".format(ELEMENT.index,ELEMENT.Dom))
+                self.ELMAT_file.write('elmat\n')
+                np.savetxt(self.ELMAT_file,LHSe,delimiter=',',fmt='%e')
+                self.ELMAT_file.write('elrhs\n')
+                np.savetxt(self.ELMAT_file,RHSe,fmt='%e')
+            
+            # ASSEMBLE ELEMENTAL CONTRIBUTIONS INTO GLOBAL SYSTEM
+            for i in range(len(ELEMENT.Te)):   # ROWS ELEMENTAL MATRIX
+                for j in range(len(ELEMENT.Te)):   # COLUMNS ELEMENTAL MATRIX
+                    self.LHS[ELEMENT.Te[i],ELEMENT.Te[j]] += LHSe[i,j]
+                self.RHS[ELEMENT.Te[i]] += RHSe[i]
+                
+        #self.output_file.write('END_CUT_ELEMENTS_INTERFACE\n')
+        if self.ELMAT_output:
+            self.ELMAT_file.write('END_CUT_ELEMENTS_INTERFACE\n')
         
         # IN THE CASE WHERE THE VACUUM VESSEL FIRST WALL CORRESPONDS TO THE COMPUTATIONAL DOMAIN'S BOUNDARY, ELEMENTS CONTAINING THE FIRST WALL ARE NOT CUT ELEMENTS 
         # BUT STILL WE NEED TO INTEGRATE ALONG THE COMPUTATIONAL DOMAIN'S BOUNDARY BOUNDARY 
+        
         if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+            
+            #self.output_file.write('BOUNDARY_ELEMENTS_INTERFACE\n')
+            if self.ELMAT_output:
+                self.ELMAT_file.write('BOUNDARY_ELEMENTS_INTERFACE\n')
+            
             for elem in self.VacVessWallElems:
                 # ISOLATE ELEMENT 
                 ELEMENT = self.Elements[elem]
                 # COMPUTE ELEMENTAL MATRICES
-                ELEMENT.IntegrateElementalInterfaceTerms(self.beta,self.LHS,self.RHS)
+                LHSe,RHSe = ELEMENT.IntegrateElementalInterfaceTerms(self.beta)
+                
+                """for iedge in range(ELEMENT.Neint):
+                    self.output_file.write("elem {:d} edge {:d}\n".format(ELEMENT.index, ELEMENT.InterEdges[iedge].int_index))
+                    self.output_file.write('Xe\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].Xeint,delimiter=',',fmt='%e')
+                    self.output_file.write('XIg\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].XIgint,delimiter=',',fmt='%e')
+                    self.output_file.write('N\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].Nint,delimiter=',',fmt='%e')
+                    self.output_file.write('dNdxi\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].dNdxiint,delimiter=',',fmt='%e')
+                    self.output_file.write('dNdeta\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].dNdetaint,delimiter=',',fmt='%e')
+                    self.output_file.write('Xg\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].Xgint,delimiter=',',fmt='%e')
+                    self.output_file.write('Wg\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].Wgint,delimiter=',',fmt='%e')
+                    self.output_file.write('detJg\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].detJgint,delimiter=',',fmt='%e')
+                    self.output_file.write('PHIg\n')
+                    np.savetxt(self.output_file,ELEMENT.InterEdges[iedge].PHI_g,delimiter=',',fmt='%e')
+                self.output_file.write('elmat\n')
+                np.savetxt(self.output_file,LHSe,delimiter=',',fmt='%e')
+                self.output_file.write('elrhs\n')
+                np.savetxt(self.output_file,RHSe,fmt='%e')"""
+                
+                if self.ELMAT_output:
+                    self.ELMAT_file.write("elem {:d} {:d}\n".format(ELEMENT.index,ELEMENT.Dom))
+                    self.ELMAT_file.write('elmat\n')
+                    np.savetxt(self.ELMAT_file,LHSe,delimiter=',',fmt='%e')
+                    self.ELMAT_file.write('elrhs\n')
+                    np.savetxt(self.ELMAT_file,RHSe,fmt='%e')
+                
+                # ASSEMBLE ELEMENTAL CONTRIBUTIONS INTO GLOBAL SYSTEM
+                for i in range(len(ELEMENT.Te)):   # ROWS ELEMENTAL MATRIX
+                    for j in range(len(ELEMENT.Te)):   # COLUMNS ELEMENTAL MATRIX
+                        self.LHS[ELEMENT.Te[i],ELEMENT.Te[j]] += LHSe[i,j]
+                    self.RHS[ELEMENT.Te[i]] += RHSe[i]
+                    
+            #self.output_file.write('END_BOUNDARY_ELEMENTS_INTERFACE\n')
+            if self.ELMAT_output:
+                self.ELMAT_file.write('END_BOUNDARY_ELEMENTS_INTERFACE\n')
+            
+        if self.ELMAT_output:
+            self.ELMAT_file.write('END_ELEMENTAL_MATRICES_FILE\n')
+            self.ELMAT_file.close()
+                
         print("Done!") 
+        
+        if self.GlobalSystem_output:
+            with open('GlobalSystem.dat', 'w') as GlobalSystemfile:
+                GlobalSystemfile.write('LHS\n')
+                for i in range(self.Nn):
+                    for j in range(self.Nn):
+                        if self.LHS[i,j] != 0.0:
+                            GlobalSystemfile.write("{:d} {:d} {:e}\n".format(i,j,self.LHS[i,j]))
+                GlobalSystemfile.write('RHS\n')
+                for i in range(self.Nn):
+                    GlobalSystemfile.write("{:e}\n".format(self.RHS[i,0]))
         
         return
     
@@ -1785,6 +1861,8 @@ class GradShafranovCutFEM:
         self.ReadEQUILIdata()
         print('Done!')
         
+        #self.output_file = open('OUTPUT.dat', 'w')
+        
         # INITIALIZATION
         print("INITIALIZATION...")
         self.it = 0
@@ -1814,14 +1892,11 @@ class GradShafranovCutFEM:
                 #self.PlotClassifiedElements_2()
                 # COMPUTE TOTAL PLASMA CURRENT CORRECTION FACTOR
                 if self.PLASMA_CURRENT == "PROFILES":
-                    #self.ComputeTotalPlasmaCurrentNormalization()
-                    self.gamma = 1
-                    print("Total plasma current normalization factor = ", self.gamma)
                     Tcurrent = self.ComputeTotalPlasmaCurrent()
-                    print("Normalised total plasma current = ", Tcurrent*self.gamma)
+                    print("Total plasma current = ", Tcurrent)
                 #self.PlotPROFILES()
                 self.PlotJphi_JphiNORM()
-                self.AssembleGlobalSystem()  
+                self.AssembleGlobalSystem() 
                 self.SolveSystem()                          # 1. SOLVE CutFEM SYSTEM  ->> PHI
                 self.ComputeCriticalPHI(self.PHI)           # 2. COMPUTE CRITICAL VALUES   PHI_0 AND PHI_X
                 self.NormalisePHI()                         # 3. NORMALISE PHI RESPECT TO CRITICAL VALUES  ->> PHI_NORM 
@@ -1844,6 +1919,9 @@ class GradShafranovCutFEM:
             #****************************************
         print('SOLUTION CONVERGED')
         #self.PlotSolution(self.PHI_CONV)
+        
+        #self.output_file.close()
+        
         return
     
     
@@ -1938,9 +2016,9 @@ class GradShafranovCutFEM:
         return
     
     
-    def InspectElement(self,element_index,INTERFACE,QUADRATURE):
+    def InspectElement(self,element_index,PHI,INTERFACE,QUADRATURE):
         
-        ELEM = self.Elements[0]
+        ELEM = self.Elements[element_index]
         Xmin = np.min(ELEM.Xe[:,0])-0.1
         Xmax = np.max(ELEM.Xe[:,0])+0.1
         Ymin = np.min(ELEM.Xe[:,1])-0.1
@@ -1964,8 +2042,9 @@ class GradShafranovCutFEM:
         fig, axs = plt.subplots(1, 2, figsize=(10,6))
         axs[0].set_xlim(self.Xmin-0.25,self.Xmax+0.25)
         axs[0].set_ylim(self.Ymin-0.25,self.Ymax+0.25)
-        axs[0].tricontourf(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=30, cmap='plasma')
-        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=[0], colors = 'black')
+        if PHI:
+            axs[0].tricontourf(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=30, cmap='plasma')
+            axs[0].tricontour(self.X[:,0],self.X[:,1], self.PHI_NORM[:,1], levels=[0], colors = 'black')
         axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         # PLOT ELEMENT EDGES
         for iedge in range(numedges):
@@ -2028,16 +2107,16 @@ class GradShafranovCutFEM:
     
     
     def PlotMesh(self):
-        Tmesh = self.T + 1
-        # Plot nodes
         plt.figure(figsize=(7,10))
         plt.ylim(np.min(self.X[:,1]),np.max(self.X[:,1]))
         plt.xlim(np.min(self.X[:,0]),np.max(self.X[:,0]))
+        # Plot nodes
         plt.plot(self.X[:,0],self.X[:,1],'.')
+        # Plot element edges
         for e in range(self.Ne):
-            for i in range(self.n):
-                plt.plot([self.X[int(Tmesh[e,i])-1,0], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,0]], 
-                        [self.X[int(Tmesh[e,i])-1,1], self.X[int(Tmesh[e,int((i+1)%self.n)])-1,1]], color='black', linewidth=1)
+            for i in range(self.numvertices):
+                plt.plot([self.X[self.T[e,i],0], self.X[self.T[e,int((i+1)%self.n)],0]], 
+                        [self.X[self.T[e,i],1], self.X[self.T[e,int((i+1)%self.n)],1]], color='black', linewidth=1)
         plt.show()
         return
     

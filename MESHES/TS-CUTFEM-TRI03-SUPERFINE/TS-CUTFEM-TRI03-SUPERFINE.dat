@@ -1,0 +1,21 @@
+$-------------------------------------------------------------------
+RUN_DATA
+  ALYA:                   name
+  RUN_TYPE:               Preliminary, Frequency=1e6 \
+                          No_restart
+END_RUN_DATA
+$-------------------------------------------------------------------
+PROBLEM_DATA
+  TIME_COUPLING:          Global, Prescribed
+  TIME_INTERVAL=          0.0, 1.0  
+  TIME_STEP_SIZE=         0.1  
+  NUMBER_OF_STEPS=        1e5   
+  MAXIMUM_NUMBER_GLOBAL=  1
+END_PROBLEM_DATA
+$-------------------------------------------------------------------
+MPI_IO: Off
+  GEOMETRY:    Off
+  RESTART:     Off
+  POSTPROCESS: Off
+END_MPI_IO
+$-------------------------------------------------------------------
