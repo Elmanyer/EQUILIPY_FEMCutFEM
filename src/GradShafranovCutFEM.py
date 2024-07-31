@@ -140,7 +140,7 @@ class GradShafranovCutFEM:
         
         self.output_file = None
         self.ELMAT_file = None
-        self.ELMAT_output = False
+        self.ELMAT_output = True
         self.GlobalSystem_output = False
         
         return

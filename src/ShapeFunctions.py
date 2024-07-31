@@ -48,6 +48,21 @@ def ShapeFunctionsReference(X, elemType, elemOrder, node):
                         case 3:
                             N = 1-xi**2
                             dNdxi = -2*xi
+                case 3:         
+                    # 1-3-4-2
+                    match node:
+                        case 1:
+                            N = -9/16*(xi+1/3)*(xi-1/3)*(xi-1)
+                            dNdxi = -9/16*((xi-1/3)*(xi-1)+(xi+1/3)*(xi-1)+(xi+1/3)*(xi-1/3))
+                        case 2:
+                            N =  9/16*(xi+1)*(xi+1/3)*(xi-1/3)
+                            dNdxi = 9/16*((xi+1/3)*(xi-1/3)+(xi+1)*(xi-1/3)+(xi+1)*(xi+1/3))
+                        case 3:
+                            N = 27/16*(xi+1)*(xi-1/3)*(xi-1)
+                            dNdxi = 27/16*((xi-1/3)*(xi-1)+ (xi+1)*(xi-1)+ (xi+1)*(xi-1/3))
+                        case 4:
+                            N = -27/16*(xi+1)*(xi+1/3)*(xi-1)
+                            dNdxi = -27/16*((xi+1/3)*(xi-1)+(xi+1)*(xi-1)+(xi+1)*(xi+1/3))
     
         case 1:   # TRIANGLE
             xi = X[0]
