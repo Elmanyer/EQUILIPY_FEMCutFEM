@@ -24,7 +24,7 @@ class Element:
         self.Te = Te                                                    # ELEMENTAL CONNECTIVITIES
         self.PlasmaLSe = PlasmaLSe                                      # ELEMENTAL NODAL PLASMA REGION LEVEL-SET VALUES
         self.VacVessLSe = VacVessLSe                                    # ELEMENTAL NODAL VACUUM VESSEL FIRST WALL LEVEL-SET VALUES
-        self.PHIe = np.zeros([self.n])                                  # ELEMENTAL NODAL PHI VALUES
+        self.PSIe = np.zeros([self.n])                                  # ELEMENTAL NODAL PSI VALUES
         self.Dom = None                                                 # DOMAIN WHERE THE ELEMENT LIES (-1: "PLASMA"; 0: "PLASMA INTERFACE"; +1: "VACUUM" ; +2: FIRST WALL ; +3: "EXTERIOR")
         
         # INTEGRATION QUADRATURES ENTITIES
@@ -446,10 +446,6 @@ class Element:
                 edgenodeset.remove(commonnode)
                 edgenode[i] = edgenodeset.pop()
                 distance[i] = np.linalg.norm(XIeint[i,:]-XIe[edgenode[i],:])
-                        
-            #print("common node = ", commonnode)
-            #print("edge nodes = ", edgenode)
-            #print("distances = ", distance)
             
             TeTESS[0,:] = [commonnode, 3,4]  # SUBELEMEMENT WITH COMMON NODE
             if distance[0] < distance[1]:
@@ -545,10 +541,10 @@ class Element:
         self.Jg = np.zeros([self.Ng2D,self.dim,self.dim])
         self.invJg = np.zeros([self.Ng2D,self.dim,self.dim])
         self.detJg = np.zeros([self.Ng2D])
-        Rmean = np.sum(self.Xe[:,0])/self.n   # mean elemental radial position
         for ig in range(self.Ng2D):
             self.Jg[ig,:,:], self.invJg[ig,:,:], self.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],self.dNdxi[ig,:],self.dNdeta[ig,:])
-            self.detJg[ig] *= 2*np.pi*Rmean   # ACCOUNT FOR AXISYMMETRICAL
+            #self.detJg[ig] *= 2*np.pi*self.Xg2D[ig,0]   # ACCOUNT FOR AXISYMMETRICAL
+            #self.detJg[ig] = self.detJg[ig]/(2*np.pi*self.Xg2D[ig,0])
             
         return    
             
@@ -593,10 +589,10 @@ class Element:
             # COMPUTE MAPPED GAUSS NODES
             self.InterEdges[edge].Xgint = N1D @ self.InterEdges[edge].Xeint
             # COMPUTE JACOBIAN INVERSE AND DETERMINANT
-            Rmeanint = np.mean(self.InterEdges[edge].Xeint[:,0])   # mean elemental radial position
             for ig in range(self.InterEdges[edge].Ngaussint):
                 self.InterEdges[edge].detJgint[ig] = Jacobian1D(self.InterEdges[edge].Xeint[:,0],self.InterEdges[edge].Xeint[:,1],dNdxi1D[ig])  
-                self.InterEdges[edge].detJgint[ig] *= 2*np.pi*Rmeanint   # ACCOUNT FOR AXISYMMETRICAL
+                #self.InterEdges[edge].detJgint[ig] *= 2*np.pi*self.InterEdges[edge].Xgint[ig,0]   # ACCOUNT FOR AXISYMMETRICAL
+                #self.InterEdges[edge].detJgint[ig] = self.InterEdges[edge].detJgint[ig]/(2*np.pi*self.InterEdges[edge].Xgint[ig,0])
                 
         return
     
@@ -684,11 +680,11 @@ class Element:
             subelem.Jg = np.zeros([subelem.Ng2D,subelem.dim,subelem.dim])
             subelem.invJg = np.zeros([subelem.Ng2D,subelem.dim,subelem.dim])
             subelem.detJg = np.zeros([subelem.Ng2D])
-            Rmeansub = np.sum(subelem.Xe[:,0])/subelem.n   # mean subelemental radial position
             for ig in range(subelem.Ng2D):
                 #subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(subelem.Xe[:,0],subelem.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])
                 subelem.Jg[ig,:,:], subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])   #### MIRAR ESTO EN FORTRAN !!
-                subelem.detJg[ig] *= 2*np.pi*Rmeansub   # ACCOUNT FOR AXISYMMETRICAL
+                #subelem.detJg[ig] *= 2*np.pi*subelem.Xg2D[ig,0]   # ACCOUNT FOR AXISYMMETRICAL
+                #subelem.detJg[ig] = subelem.detJg[ig]/(2*np.pi*subelem.Xg2D[ig,0])  
                 
         ######### MODIFIED QUADRATURE TO INTEGRATE OVER ELEMENTAL INTERFACES
         #### STANDARD REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
@@ -706,11 +702,11 @@ class Element:
             self.InterEdges[edge].Nint, self.InterEdges[edge].dNdxiint, self.InterEdges[edge].dNdetaint = EvaluateReferenceShapeFunctions(self.InterEdges[edge].XIgint, self.ElType, self.ElOrder, self.n)
             # MAPP REFERENCE INTERFACE MODIFIED QUADRATURE ON PHYSICAL ELEMENT 
             self.InterEdges[edge].Xgint = N1D @ self.InterEdges[edge].Xeint
-            
-            Rmeanint = np.mean(self.InterEdges[edge].Xeint[:,0])   # mean interface radial position
+        
             for ig in range(self.InterEdges[edge].Ngaussint):
                 self.InterEdges[edge].detJgint[ig] = Jacobian1D(self.InterEdges[edge].Xeint[:,0],self.InterEdges[edge].Xeint[:,1],dNdxi1D[ig,:])  
-                self.InterEdges[edge].detJgint[ig] *= 2*np.pi*Rmeanint   # ACCOUNT FOR AXISYMMETRICAL    
+                #self.InterEdges[edge].detJgint[ig] *= 2*np.pi*self.InterEdges[edge].Xgint[ig,0]  # ACCOUNT FOR AXISYMMETRICAL 
+                #self.InterEdges[edge].detJgint[ig] = self.InterEdges[edge].detJgint[ig]/(2*np.pi*self.InterEdges[edge].Xgint[ig,0])     
         return 
     
     
@@ -718,7 +714,7 @@ class Element:
     ################################ ELEMENTAL INTEGRATION ###########################################
     ##################################################################################################
     
-    def IntegrateElementalDomainTerms(self,SourceTermg):
+    def IntegrateElementalDomainTerms(self,SourceTermg,*args):
         """ Input: - SourceTermg: source term (plasma current) evaluated at physical gauss integration nodes
                    - LHS: global system Left-Hand-Side matrix 
                    - RHS: global system Reft-Hand-Side vector
@@ -731,6 +727,10 @@ class Element:
         for ig in range(self.Ng2D):  
             # SHAPE FUNCTIONS GRADIENT
             Ngrad = np.array([self.dNdxi[ig,:],self.dNdeta[ig,:]])
+            R = self.Xg2D[ig,0]
+            if args:   # DIMENSIONLESS SOLUTION CASE  -->> args[0] = R0
+                Ngrad *= args[0]
+                R /= args[0]
             # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM 
             for i in range(len(self.Te)):   # ROWS ELEMENTAL MATRIX
                 for j in range(len(self.Te)):   # COLUMNS ELEMENTAL MATRIX
@@ -738,15 +738,15 @@ class Element:
                     ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
                     LHSe[i,j] -= (self.invJg[ig,:,:]@Ngrad[:,i])@(self.invJg[ig,:,:]@Ngrad[:,j])*self.detJg[ig]*self.Wg2D[ig]
                     ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                    LHSe[i,j] -= (1/self.Xg2D[ig,0])*self.N[ig,j] * (self.invJg[ig,0,:]@Ngrad[:,i])*self.detJg[ig]*self.Wg2D[ig]
+                    LHSe[i,j] -= (1/R)*self.N[ig,j] * (self.invJg[ig,0,:]@Ngrad[:,i])*self.detJg[ig]*self.Wg2D[ig]
                 # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
                 RHSe[i] += SourceTermg[ig] * self.N[ig,i] *self.detJg[ig]*self.Wg2D[ig]
                 
         return LHSe, RHSe
     
     
-    def IntegrateElementalInterfaceTerms(self,beta):
-        """ Input: - PHI_g: Interface condition, evaluated at physical gauss integration nodes
+    def IntegrateElementalInterfaceTerms(self,beta,*args):
+        """ Input: - PSI_g: Interface condition, evaluated at physical gauss integration nodes
                    - beta: Nitsche's method penalty parameter
                    - LHS: global system Left-Hand-Side matrix 
                    - RHS: global system Reft-Hand-Side vector 
@@ -763,21 +763,23 @@ class Element:
             for ig in range(EDGE.Ngaussint):  
                 # SHAPE FUNCTIONS GRADIENT
                 Ngrad = np.array([EDGE.dNdxiint[ig,:],EDGE.dNdetaint[ig,:]])
+                if args:   # DIMENSIONLESS SOLUTION CASE  -->> args[0] = R0
+                    Ngrad *= args[0]
                 # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
                 for i in range(len(self.Te)):  # ROWS ELEMENTAL MATRIX
                     for j in range(len(self.Te)):  # COLUMNS ELEMENTAL MATRIX
                         # COMPUTE LHS MATRIX TERMS
                         ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
-                        LHSe[i,j] += EDGE.Nint[ig,i] * EDGE.NormalVec @ Ngrad[:,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+                        LHSe[i,j] += EDGE.Nint[ig,i] * (EDGE.NormalVec @ Ngrad[:,j]) * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                         ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
                         LHSe[i,j] += EDGE.NormalVec @ Ngrad[:,i]*(EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig])
                         ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
                         LHSe[i,j] += beta * EDGE.Nint[ig,i] * EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                     # COMPUTE RHS VECTOR TERMS 
-                    ### SYMMETRIC NITSCHE'S METHOD TERM  [ PHI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
-                    RHSe[i] +=  EDGE.PHI_g[ig] * EDGE.NormalVec @ Ngrad[:,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
-                    ### PENALTY TERM   [ beta * N_i * PHI_D *(Jacobiano*2pi*rad) ]
-                    RHSe[i] +=  beta * EDGE.PHI_g[ig] * EDGE.Nint[ig,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+                    ### SYMMETRIC NITSCHE'S METHOD TERM  [ PSI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
+                    RHSe[i] +=  EDGE.PSI_g[ig] * EDGE.NormalVec @ Ngrad[:,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+                    ### PENALTY TERM   [ beta * N_i * PSI_D *(Jacobiano*2pi*rad) ]
+                    RHSe[i] +=  beta * EDGE.PSI_g[ig] * EDGE.Nint[ig,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
         
         return LHSe, RHSe
     
