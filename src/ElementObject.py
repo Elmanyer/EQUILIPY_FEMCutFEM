@@ -543,8 +543,6 @@ class Element:
         self.detJg = np.zeros([self.Ng2D])
         for ig in range(self.Ng2D):
             self.Jg[ig,:,:], self.invJg[ig,:,:], self.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],self.dNdxi[ig,:],self.dNdeta[ig,:])
-            #self.detJg[ig] *= 2*np.pi*self.Xg2D[ig,0]   # ACCOUNT FOR AXISYMMETRICAL
-            #self.detJg[ig] = self.detJg[ig]/(2*np.pi*self.Xg2D[ig,0])
             
         return    
             
@@ -591,8 +589,6 @@ class Element:
             # COMPUTE JACOBIAN INVERSE AND DETERMINANT
             for ig in range(self.InterEdges[edge].Ngaussint):
                 self.InterEdges[edge].detJgint[ig] = Jacobian1D(self.InterEdges[edge].Xeint[:,0],self.InterEdges[edge].Xeint[:,1],dNdxi1D[ig])  
-                #self.InterEdges[edge].detJgint[ig] *= 2*np.pi*self.InterEdges[edge].Xgint[ig,0]   # ACCOUNT FOR AXISYMMETRICAL
-                #self.InterEdges[edge].detJgint[ig] = self.InterEdges[edge].detJgint[ig]/(2*np.pi*self.InterEdges[edge].Xgint[ig,0])
                 
         return
     
@@ -683,8 +679,6 @@ class Element:
             for ig in range(subelem.Ng2D):
                 #subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(subelem.Xe[:,0],subelem.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])
                 subelem.Jg[ig,:,:], subelem.invJg[ig,:,:], subelem.detJg[ig] = Jacobian(self.Xe[:,0],self.Xe[:,1],subelem.dNdxi[ig,:],subelem.dNdeta[ig,:])   #### MIRAR ESTO EN FORTRAN !!
-                #subelem.detJg[ig] *= 2*np.pi*subelem.Xg2D[ig,0]   # ACCOUNT FOR AXISYMMETRICAL
-                #subelem.detJg[ig] = subelem.detJg[ig]/(2*np.pi*subelem.Xg2D[ig,0])  
                 
         ######### MODIFIED QUADRATURE TO INTEGRATE OVER ELEMENTAL INTERFACES
         #### STANDARD REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
@@ -705,8 +699,7 @@ class Element:
         
             for ig in range(self.InterEdges[edge].Ngaussint):
                 self.InterEdges[edge].detJgint[ig] = Jacobian1D(self.InterEdges[edge].Xeint[:,0],self.InterEdges[edge].Xeint[:,1],dNdxi1D[ig,:])  
-                #self.InterEdges[edge].detJgint[ig] *= 2*np.pi*self.InterEdges[edge].Xgint[ig,0]  # ACCOUNT FOR AXISYMMETRICAL 
-                #self.InterEdges[edge].detJgint[ig] = self.InterEdges[edge].detJgint[ig]/(2*np.pi*self.InterEdges[edge].Xgint[ig,0])     
+
         return 
     
     
@@ -725,8 +718,8 @@ class Element:
         
         # LOOP OVER GAUSS INTEGRATION NODES
         for ig in range(self.Ng2D):  
-            # SHAPE FUNCTIONS GRADIENT
-            Ngrad = np.array([self.dNdxi[ig,:],self.dNdeta[ig,:]])
+            # SHAPE FUNCTIONS GRADIENT IN PHYSICAL SPACE
+            Ngrad = self.invJg[ig,:,:]@np.array([self.dNdxi[ig,:],self.dNdeta[ig,:]])
             R = self.Xg2D[ig,0]
             if args:   # DIMENSIONLESS SOLUTION CASE  -->> args[0] = R0
                 Ngrad *= args[0]
@@ -736,9 +729,9 @@ class Element:
                 for j in range(len(self.Te)):   # COLUMNS ELEMENTAL MATRIX
                     # COMPUTE LHS MATRIX TERMS
                     ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
-                    LHSe[i,j] -= (self.invJg[ig,:,:]@Ngrad[:,i])@(self.invJg[ig,:,:]@Ngrad[:,j])*self.detJg[ig]*self.Wg2D[ig]
+                    LHSe[i,j] -= Ngrad[:,j]@Ngrad[:,i]*self.detJg[ig]*self.Wg2D[ig]
                     ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
-                    LHSe[i,j] -= (1/R)*self.N[ig,j] * (self.invJg[ig,0,:]@Ngrad[:,i])*self.detJg[ig]*self.Wg2D[ig]
+                    LHSe[i,j] += (1/R)*self.N[ig,j]*Ngrad[0,i]*self.detJg[ig]*self.Wg2D[ig]
                 # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
                 RHSe[i] += SourceTermg[ig] * self.N[ig,i] *self.detJg[ig]*self.Wg2D[ig]
                 
@@ -761,23 +754,25 @@ class Element:
             EDGE = self.InterEdges[edge]
             # LOOP OVER GAUSS INTEGRATION NODES
             for ig in range(EDGE.Ngaussint):  
-                # SHAPE FUNCTIONS GRADIENT
-                Ngrad = np.array([EDGE.dNdxiint[ig,:],EDGE.dNdetaint[ig,:]])
+                # SHAPE FUNCTIONS GRADIENT IN PHYSICAL SPACE
+                n_dot_Ngrad = EDGE.NormalVec@np.array([EDGE.dNdxiint[ig,:],EDGE.dNdetaint[ig,:]])
+                R = EDGE.Xgint[ig,0]
                 if args:   # DIMENSIONLESS SOLUTION CASE  -->> args[0] = R0
-                    Ngrad *= args[0]
+                    n_dot_Ngrad *= args[0]
+                    R /= args[0]
                 # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
                 for i in range(len(self.Te)):  # ROWS ELEMENTAL MATRIX
                     for j in range(len(self.Te)):  # COLUMNS ELEMENTAL MATRIX
                         # COMPUTE LHS MATRIX TERMS
                         ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
-                        LHSe[i,j] += EDGE.Nint[ig,i] * (EDGE.NormalVec @ Ngrad[:,j]) * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+                        LHSe[i,j] += EDGE.Nint[ig,i] * n_dot_Ngrad[j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                         ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
-                        LHSe[i,j] += EDGE.NormalVec @ Ngrad[:,i]*(EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig])
+                        LHSe[i,j] += n_dot_Ngrad[i]*EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                         ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
                         LHSe[i,j] += beta * EDGE.Nint[ig,i] * EDGE.Nint[ig,j] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                     # COMPUTE RHS VECTOR TERMS 
                     ### SYMMETRIC NITSCHE'S METHOD TERM  [ PSI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
-                    RHSe[i] +=  EDGE.PSI_g[ig] * EDGE.NormalVec @ Ngrad[:,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
+                    RHSe[i] +=  EDGE.PSI_g[ig] * n_dot_Ngrad[i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
                     ### PENALTY TERM   [ beta * N_i * PSI_D *(Jacobiano*2pi*rad) ]
                     RHSe[i] +=  beta * EDGE.PSI_g[ig] * EDGE.Nint[ig,i] * EDGE.detJgint[ig] * EDGE.Wgint[ig]
         

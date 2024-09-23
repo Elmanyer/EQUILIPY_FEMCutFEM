@@ -37,12 +37,13 @@ class GradShafranovCutFEM:
         self.ElementsClassi_file = None     # OUTPUT FILE CONTAINING THE CLASSIFICATION OF MESH ELEMENTS
         self.PlasmaLevSetVals_file = None   # OUTPUT FILE CONTAINING THE PLASMA BOUNDARY LEVEL-SET FIELD VALUES
         self.VacVessLevSetVals_file = None  # OUTPUT FILE CONTAINING THE VACUUM VESSEL BOUNDARY LEVEL-SET FIELD VALUES
+        self.L2error_file = None
         
         # DECLARE PROBLEM ATTRIBUTES
-        self.PLASMA_BOUNDARY = None         # PLASMA BOUNDARY BEHAVIOUR: 'FIXED'  or  'FREE'
-        self.PLASMA_GEOMETRY = None         # PLASMA REGION GEOMETRY: "FIRST_WALL" or "F4E" 
-        self.PLASMA_CURRENT = None          # PLASMA CURRENT MODELISATION: "LINEAR", "NONLINEAR" or "PROFILES"
-        self.VACUUM_VESSEL = None           # VACUUM VESSEL GEOMETRY: "COMPUTATIONAL_DOMAIN" or "FIRST_WALL"
+        self.PLASMA_BOUNDARY = None         # PLASMA BOUNDARY BEHAVIOUR: self.FIXED_BOUNDARY  or  self.FREE_BOUNDARY
+        self.PLASMA_GEOMETRY = None         # PLASMA REGION GEOMETRY: self.FIRST_WALL or self.F4E_BOUNDARY 
+        self.PLASMA_CURRENT = None          # PLASMA CURRENT MODELISATION: self.LINEAR_CURRENT, self.NONLINEAR_CURRENT or self.PROFILES_CURRENT
+        self.VACUUM_VESSEL = None           # VACUUM VESSEL GEOMETRY: self.COMPUTATIONAL or self.FIRST_WALL
         self.TOTAL_CURRENT = None           # TOTAL CURRENT IN PLASMA
         self.PlasmaElems = None             # LIST OF ELEMENTS (INDEXES) INSIDE PLASMA REGION
         self.VacuumElems = None             # LIST OF ELEMENTS (INDEXES) OUTSIDE PLASMA REGION (VACUUM REGION)
@@ -153,11 +154,25 @@ class GradShafranovCutFEM:
         self.gamma = None                        # PLASMA TOTAL CURRENT CORRECTION FACTOR
         #### BOUNDARY CONSTRAINTS
         self.beta = None                         # NITSCHE'S METHOD PENALTY TERM
-        self.coeffs1W = []                       # TOKAMAK FIRST WALL LEVEL-0 CONTOUR COEFFICIENTS (LINEAR PLASMA MODEL CASE SOLUTION)
         self.nsole = 2                           # NUMBER OF NODES ON SOLENOID ELEMENT
         
+        self.FIXED_BOUNDARY = 0
+        self.FREE_BOUNDARY = 1
+        self.FIRST_WALL = 0
+        self.COMPUTATIONAL = 1
+        self.F4E_BOUNDARY = 2
+        
+        # PLASMA MODEL PARAMETERS
+        self.LINEAR_CURRENT = 0
+        self.NONLINEAR_CURRENT = 1
+        self.ZHENG_CURRENT = 2
+        self.PROFILES_CURRENT = 3
+        self.coeffsLINEAR = None                       # TOKAMAK FIRST WALL LEVEL-0 CONTOUR COEFFICIENTS (LINEAR PLASMA MODEL CASE SOLUTION)
+        self.coeffsNONLINEAR = [1.15*np.pi, 1.15, -0.5]  # [Kr, Kz, R0] 
+        self.coeffsZHENG = None
+        
         self.activenodes = None
-        self.coeffsZHENG = np.zeros([6])
+        self.L2error = None
         
         self.output_file = None
         self.ELMAT_file = None
@@ -257,7 +272,7 @@ class GradShafranovCutFEM:
                 j += 1
             if k>=0:
                 for m in range(self.nedge+1):
-                    self.Tbound[k,m] = float(l[m+1])
+                    self.Tbound[k,m] = int(l[m+1])
                 k += 1
         file.close()
         # PYTHON INDEXES START AT 0 AND NOT AT 1. THUS, THE CONNECTIVITY MATRIX INDEXES MUST BE MODIFIED
@@ -299,23 +314,43 @@ class GradShafranovCutFEM:
         # INTER-CODE FUNCTIONS TO READ INPUT PARAMETERS BY BLOCKS 
         
         def BlockProblemParameters(self,line):
-            if line[0] == 'PLASMA_BOUNDARY:':          # READ PLASMA BOUNDARY CONDITION (FIXED OR FREE)
-                self.PLASMA_BOUNDARY = line[1]
-            elif line[0] == 'PLASMA_GEOMETRY:':        # READ PLASMA REGION GEOMETRY (VACUUM VESSEL FIRST WALL OR F4E TRUE SHAPE)
-                self.PLASMA_GEOMETRY = line[1]
-            elif line[0] == 'PLASMA_CURRENT:':         # READ MODEL FOR PLASMA CURRENT (LINEAR, NONLINEAR, ZHENG OR DEFINED USING PROFILES FOR PRESSURE AND TOROIDAL FIELD)
-                self.PLASMA_CURRENT = line[1]
-            elif line[0] == 'VACUUM_VESSEL:':          # READ VACUUM VESSEL GEOMETRY (RECTANGLE -> COMPUTATIONAL DOMAIN BOUNDARY ; FIRST_WALL -> USE FIRST WALL GEOMETRY)
-                self.VACUUM_VESSEL = line[1]
+            if line[0] == 'PLASB:':          # READ PLASMA BOUNDARY CONDITION (FIXED OR FREE)
+                if line[1] == 'FIXED':
+                    self.PLASMA_BOUNDARY =  self.FIXED_BOUNDARY
+                elif line[1] == 'FREE':
+                    self.PLASMA_BOUNDARY = self.FREE_BOUNDARY
+            elif line[0] == 'PLASG:':        # READ PLASMA REGION GEOMETRY (VACUUM VESSEL FIRST WALL OR F4E TRUE SHAPE)
+                if line[1] == 'FIRST':
+                    self.PLASMA_GEOMETRY = self.FIRST_WALL
+                elif line[1] == 'COMPU':
+                    self.PLASMA_GEOMETRY = self.COMPUTATIONAL
+                elif line[1] == 'PARAM':
+                    self.PLASMA_GEOMETRY = self.F4E_BOUNDARY
+            elif line[0] == 'PLASC:':         # READ MODEL FOR PLASMA CURRENT (LINEAR, NONLINEAR, ZHENG OR DEFINED USING PROFILES FOR PRESSURE AND TOROIDAL FIELD)
+                if line[1] == 'LINEA':
+                    self.PLASMA_CURRENT = self.LINEAR_CURRENT
+                elif line[1] == 'NONLI':
+                    self.PLASMA_CURRENT = self.NONLINEAR_CURRENT
+                elif line[1] == self.ZHENG_CURRENT:
+                    self.PLASMA_CURRENT = self.ZHENG_CURRENT
+                elif line[1] == 'PROFI':
+                    self.PLASMA_CURRENT = self.PROFILES_CURRENT
+                else:
+                    self.PLASMA_CURRENT = l[1]
+            elif line[0] == 'VACVE:':          # READ VACUUM VESSEL GEOMETRY (RECTANGLE -> COMPUTATIONAL DOMAIN BOUNDARY ; FIRST_WALL -> USE FIRST WALL GEOMETRY)
+                if line[1] == 'FIRST':
+                    self.VACUUM_VESSEL = self.FIRST_WALL
+                elif line[1] == 'COMPU':
+                    self.VACUUM_VESSEL = self.COMPUTATIONAL
+                elif line[1] == 'PARAM':
+                    self.VACUUM_VESSEL = self.F4E_BOUNDARY
             elif line[0] == 'TOTAL_CURRENT:':        # READ TOTAL PLASMA CURRENT
                 self.TOTAL_CURRENT = float(line[1])
             return
         
         def BlockFirstWall(self,line):
-            if line[0] == 'R_MAX:':          # READ TOKAMAK FIRST WALL MAJOR RADIUS 
-                self.Rmax = float(line[1])
-            elif line[0] == 'R_MIN:':        # READ TOKAMAK FIRST WALL MINOR RADIUS 
-                self.Rmin = float(line[1])
+            if line[0] == 'R0TOK:':          # READ TOKAMAK FIRST WALL MAJOR RADIUS 
+                self.R0 = float(line[1])
             elif line[0] == 'EPSILON:':      # READ TOKAMAK FIRST WALL INVERSE ASPECT RATIO
                 self.epsilon = float(line[1])
             elif line[0] == 'KAPPA:':        # READ TOKAMAK FIRST WALL ELONGATION 
@@ -340,9 +375,9 @@ class GradShafranovCutFEM:
                 self.R_LEFTMOST = float(line[1])
             elif line[0] == 'Z_LEFTMOST:':    # READ PLASMA REGION Y_CENTER 
                 self.Z_LEFTMOST = float(line[1])
-            elif line[0] == 'R_TOP:':    # READ PLASMA REGION X_CENTER 
+            elif line[0] == 'R_TOPP:':    # READ PLASMA REGION X_CENTER 
                 self.R_TOP = float(line[1])
-            elif line[0] == 'Z_TOP:':    # READ PLASMA REGION Y_CENTER 
+            elif line[0] == 'Z_TOPP:':    # READ PLASMA REGION Y_CENTER 
                 self.Z_TOP = float(line[1])
             return
         
@@ -366,9 +401,9 @@ class GradShafranovCutFEM:
                 self.Isolenoids = np.zeros([self.Nsolenoids])
             elif line[0] == 'Rposi:' and j<self.Nsolenoids:    # READ j-th SOLENOID X POSITION
                 self.Xsolenoids[j,0] = float(line[1])
-            elif line[0] == 'Zlow:' and j<self.Nsolenoids:     # READ j-th SOLENOID Y POSITION
+            elif line[0] == 'Zlowe:' and j<self.Nsolenoids:     # READ j-th SOLENOID Y POSITION
                 self.Xsolenoids[j,1] = float(line[1])
-            elif line[0] == 'Zup:' and j<self.Nsolenoids:      # READ j-th SOLENOID Y POSITION
+            elif line[0] == 'Zuppe:' and j<self.Nsolenoids:      # READ j-th SOLENOID Y POSITION
                 self.Xsolenoids[j,2] = float(line[1])
             elif line[0] == 'Inten:' and j<self.Nsolenoids:    # READ j-th SOLENOID INTENSITY
                 self.Isolenoids[j] = float(line[1])
@@ -376,15 +411,15 @@ class GradShafranovCutFEM:
             return i, j
         
         def BlockProfiles(self,line):
-            if line[0] == 'B0:':    # READ TOROIDAL FIELD MAGNITUDE ON MAGNETIC AXIS
+            if line[0] == 'B0_equ:':    # READ TOROIDAL FIELD MAGNITUDE ON MAGNETIC AXIS
                 self.B0 = float(line[1])
-            elif line[0] == 'q0:':    # READ TOKAMAK SAFETY FACTOR 
+            elif line[0] == 'q0_equ:':    # READ TOKAMAK SAFETY FACTOR 
                 self.q0 = float(line[1])
-            elif line[0] == 'n_p:':    # READ EXPONENT FOR PRESSURE PROFILE p_hat FUNCTION 
+            elif line[0] == 'np_equ:':    # READ EXPONENT FOR PRESSURE PROFILE p_hat FUNCTION 
                 self.n_p = float(line[1])
-            elif line[0] == 'g0:':    # READ TOROIDAL FIELD PROFILE FACTOR
+            elif line[0] == 'g0_equ:':    # READ TOROIDAL FIELD PROFILE FACTOR
                 self.G0 = float(line[1])
-            elif line[0] == 'n_g:':    # READ EXPONENT FOR TOROIDAL FIELD PROFILE g_hat FUNCTION
+            elif line[0] == 'ng_equ:':    # READ EXPONENT FOR TOROIDAL FIELD PROFILE g_hat FUNCTION
                 self.n_g = float(line[1])
             return
         
@@ -399,7 +434,7 @@ class GradShafranovCutFEM:
                 self.INT_ITER = int(line[1])
             elif line[0] == 'INT_TOL:':          # READ TOLERANCE FOR INTERNAL LOOP
                 self.INT_TOL = float(line[1])
-            elif line[0] == 'BETA:':             # READ NITSCHE'S METHOD PENALTY PARAMETER 
+            elif line[0] == 'BETA_equ:':             # READ NITSCHE'S METHOD PENALTY PARAMETER 
                 self.beta = float(line[1])
             elif line[0] == 'RELAXATION:':       # READ AITKEN'S METHOD RELAXATION PARAMETER
                 self.alpha = float(line[1])
@@ -427,27 +462,24 @@ class GradShafranovCutFEM:
                 # READ TOKAMAK FIRST WALL GEOMETRY PARAMETERS
                 BlockFirstWall(self,l)
                 # READ CONTROL POINTS COORDINATES FOR F4E PLASMA SHAPE
-                if self.PLASMA_GEOMETRY == 'F4E':
+                if self.PLASMA_GEOMETRY == self.F4E_BOUNDARY:
                     BlockF4E(self,l)
                 # READ PARAMETERS FOR PRESSURE AND TOROIDAL FIELD PROFILES
-                if self.PLASMA_CURRENT == 'PROFILES':
+                if self.PLASMA_CURRENT == self.PROFILES_CURRENT:
                     BlockProfiles(self,l)
                 # READ COIL PARAMETERS
-                if self.PLASMA_BOUNDARY == 'FREE':
+                if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
                     i,j = BlockExternalMagnets(self,l,i,j)
                 # READ NUMERICAL TREATMENT PARAMETERS
                 BlockNumericalTreatement(self,l)
                 
         if self.PLASMA_BOUNDARY == self.VACUUM_VESSEL:
             raise Exception("PLASMA REGION GEOMETRY AND VACUUM VESSEL FIRST WALL GEOMETRY MUST BE DIFFERENT")
-            
-        # COMPUTE TOKAMAK MEAN RADIUS
-        #self.R0 = (self.Rmax+self.Rmin)/2
-        self.R0 = self.Rmax
-        # TOKAMAK'S 1rst WALL GEOMETRY COEFFICIENTS, USED ALSO FOR LINEAR PLASMA MODEL ANALYTICAL SOLUTION (INITIAL GUESS)
-        self.coeffs1W = self.ComputeLinearSolutionCoefficients()
         
-        if self.PLASMA_CURRENT == "PROFILES":
+        # TOKAMAK'S 1rst WALL GEOMETRY COEFFICIENTS, USED ALSO FOR LINEAR PLASMA MODEL ANALYTICAL SOLUTION (INITIAL GUESS)
+        self.coeffsLINEAR = self.ComputeLinearSolutionCoefficients()
+        
+        if self.PLASMA_CURRENT == self.PROFILES_CURRENT:
             # COMPUTE PRESSURE PROFILE FACTOR
             self.P0=self.B0*((self.kappa**2)+1)/(self.mu0*(self.R0**2)*self.q0*self.kappa)
             
@@ -459,17 +491,49 @@ class GradShafranovCutFEM:
         
         # LOOK FOR EXTREMUM IN LINEAR OR NONLINEAR ANALITYCAL SOLUTIONS IN ORDER TO NORMALISE THE CONSTRAINED VALUES ON THE INTERFACE FOR FIXED BOUNDARY PROBLEM
         self.PSIextr_analytical = 1.0
-        """if self.PLASMA_BOUNDARY == 'FIXED' and self.PLASMA_CURRENT in ['LINEAR', 'NONLINEAR']:
+        if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY and self.PLASMA_CURRENT in [self.LINEAR_CURRENT, self.NONLINEAR_CURRENT]:
             X0 = np.array([self.R0,0])
             match self.PLASMA_CURRENT:
-                case "LINEAR":
-                    sol = optimize.minimize(self.AnalyticalSolutionLINEAR, X0)
-                    self.PSIextr_analytical = self.AnalyticalSolutionLINEAR(sol.x)
-                case "NONLINEAR":
-                    sol = optimize.minimize(self.AnalyticalSolutionMINUSNONLINEAR, X0)
-                    self.PSIextr_analytical = self.AnalyticalSolutionNONLINEAR(sol.x)"""
+                case self.LINEAR_CURRENT:
+                    self.Xcrit_analytical = optimize.minimize(self.PSIAnalyticalSolution, X0, args=(self.PLASMA_CURRENT)).x
+                    self.PSIextr_analytical = self.PSIAnalyticalSolution(self.Xcrit_analytical,self.PLASMA_CURRENT)
+                case self.NONLINEAR_CURRENT:
+                    def minusPSIanal(X):
+                        return -self.PSIAnalyticalSolution(X,self.NONLINEAR_CURRENT)
+                    self.Xcrit_analytical = optimize.minimize(minusPSIanal,X0).x
+                    self.PSIextr_analytical = self.PSIAnalyticalSolution(self.Xcrit_analytical,self.PLASMA_CURRENT)
         
         print('Done!')  
+        return
+    
+    def ReadFixdata(self):
+        print("     -> READ FIX DATA FILE...",end='')
+        # READ EQU FILE .equ.dat
+        FixDataFile = self.mesh_folder +'/'+ 'TS-CUTFEM-' + self.MESH +'.fix.dat'
+        file = open(FixDataFile, 'r') 
+        self.BoundaryIden = np.zeros([self.Nbound],dtype=int)
+        for line in file:
+            l = line.split(' ')
+            l = [m for m in l if m != '']
+            for e, el in enumerate(l):
+                if el == '\n':
+                    l.remove('\n') 
+                elif el[-1:]=='\n':
+                    l[e]=el[:-1]
+            
+            if l[0] == "ON_BOUNDARIES" or l[0] == "END_ON_BOUNDARIES":
+                pass
+            else:
+                self.BoundaryIden[int(l[0])-1] = int(l[1])
+                
+        # DEFINE THE DIFFERENT SETS OB BOUNDARY NODES
+        self.BoundaryNodesSets = [set(),set()]
+        for iboun in range(self.Nbound):
+            for node in self.Tbound[iboun,:-1]:
+                self.BoundaryNodesSets[self.BoundaryIden[iboun]-1].add(node)
+        # CONVERT BOUNDARY NODES SET INTO ARRAY
+        self.BoundaryNodesSets[0] = np.array(sorted(self.BoundaryNodesSets[0]))
+        self.BoundaryNodesSets[1] = np.array(sorted(self.BoundaryNodesSets[1]))
         return
     
     
@@ -504,6 +568,8 @@ class GradShafranovCutFEM:
         Rt = self.R0 - self.delta*a    # PLASMA SHAPE HIGHEST POINT R COORDINATE
         Zt = self.kappa*a              # PLASMA SHAPE HIGHEST POINT Z COORDINATE
         
+        self.coeffsZHENG = np.zeros([6])
+        
         # SET THE COEFFICIENT A2 TO 0 FOR SIMPLICITY
         self.coeffsZHENG[5] = 0
         # COMPUTE COEFFICIENT A1 BY IMPOSING A CONSTANT TOTAL TOROIDAL PLASMA CURRENT Ip
@@ -535,51 +601,27 @@ class GradShafranovCutFEM:
     def PSIAnalyticalSolution(self,X,MODEL):
         """ Function which computes the ANALYTICAL SOLUTION FOR THE LINEAR PLASMA MODEL at point with coordinates X. """
         match MODEL:
-            case "LINEAR":
+            case self.LINEAR_CURRENT:
                 # DIMENSIONALESS COORDINATES
                 Xstar = X/self.R0
                 # ANALYTICAL SOLUTION
-                PSIexact = (Xstar[0]**4)/8 + self.coeffs1W[0] + self.coeffs1W[1]*Xstar[0]**2 + self.coeffs1W[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2)
+                PSIexact = (Xstar[0]**4)/8 + self.coeffsLINEAR[0] + self.coeffsLINEAR[1]*Xstar[0]**2 + self.coeffsLINEAR[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2)
                 
-            case "NONLINEAR":
+            case self.NONLINEAR_CURRENT:
                 # DIMENSIONALESS COORDINATES
                 Xstar = X/self.R0 
                 # ANALYTICAL SOLUTION
-                coeffs = [1.15*np.pi, 1.15, -0.5]  # [Kr, Kz, R0] 
-                PSIexact = np.sin(coeffs[0]*(Xstar[0]+coeffs[2]))*np.cos(coeffs[1]*Xstar[1])  
+                PSIexact = np.sin(self.coeffsNONLINEAR[0]*(Xstar[0]+self.coeffsNONLINEAR[2]))*np.cos(self.coeffsNONLINEAR[1]*Xstar[1])  
                 
-            case "ZHENG":
+            case self.ZHENG_CURRENT:
                 # ANALYTICAL SOLUTION
                 PSIexact = self.coeffsZHENG[0]+self.coeffsZHENG[1]*X[0]**2+self.coeffsZHENG[2]*(X[0]**4-4*X[0]**2*X[1]**2)+self.coeffsZHENG[3]*(np.log(X[0])
                                     *X[0]**2-X[1]**2)+(self.coeffsZHENG[4]*X[0]**4)/8 - (self.coeffsZHENG[5]*X[1]**2)/2
+                
+            case "FAKE":
+                PSIexact = np.sin(2*X[0])+0.1*X[1]**3
         
         return PSIexact
-    
-    
-    def AnalyticalSolutionLINEAR(self,X):
-        """ Function which computes the ANALYTICAL SOLUTION FOR THE LINEAR PLASMA MODEL at point with coordinates X. """
-        # DIMENSIONALESS COORDINATES
-        Xstar = X/self.R0
-        # ANALYTICAL SOLUTION
-        PSIexact = (Xstar[0]**4)/8 + self.coeffs1W[0] + self.coeffs1W[1]*Xstar[0]**2 + self.coeffs1W[2]*(Xstar[0]**4-4*Xstar[0]**2*Xstar[1]**2)
-        return PSIexact
-            
-    def AnalyticalSolutionNONLINEAR(self,X):
-        """ Function which computes the ANALYTICAL SOLUTION FOR THE MANUFACTURED NONLINEAR PLASMA MODEL at point with coordinates X. """
-        # DIMENSIONALESS COORDINATES
-        Xstar = X/self.R0 
-        # ANALYTICAL SOLUTION
-        coeffs = [1.15*np.pi, 1.15, -0.5]  # [Kr, Kz, R0] 
-        PSIexact = np.sin(coeffs[0]*(Xstar[0]+coeffs[2]))*np.cos(coeffs[1]*Xstar[1])  
-        return PSIexact
-    
-    def AnalyticalSolutionZHENG(self,X):
-        """ Function which computes the ANALYTICAL SOLUTION FOR THE MANUFACTURED PLASMA CURRENT MODEL PROPOSED IN PAPER ZHENG. """
-        PSIexact = self.coeffsZHENG[0]+self.coeffsZHENG[1]*X[0]**2+self.coeffsZHENG[2]*(X[0]**4-4*X[0]**2*X[1]**2)+self.coeffsZHENG[3]*(X[0]**2*
-                                    np.log(X[0])-X[1]**2)+(self.coeffsZHENG[4]*X[0]**4)/8 - (self.coeffsZHENG[5]*X[1]**2)/2
-        return PSIexact
-    
-    
     
     ##################################################################################################
     ###################################### PLASMA CURRENT ############################################
@@ -588,23 +630,21 @@ class GradShafranovCutFEM:
     def Jphi(self,X,PSI):
         # COMPUTES THE SOURCE TERM Jphi, WHICH GOES IN THE GRAD-SHAFRANOV EQ. RIGHT-HAND-SIDE     mu0*R*Jphi
         match self.PLASMA_CURRENT:
-            case 'LINEAR':
+            case self.LINEAR_CURRENT:
                 # COMPUTE LINEAR MODEL PLASMA CURRENT
                 Jphi = X[0]/self.mu0
             
-            case 'NONLINEAR': 
+            case self.NONLINEAR_CURRENT: 
                 # COMPUTE NONLINEAR MODEL PLASMA CURRENT
-                Kr = 1.15*np.pi
-                Kz = 1.15
-                r0 = -0.5
-                Jphi = -((Kr**2+Kz**2)*PSI+(Kr/X[0])*np.cos(Kr*(X[0]+r0))*np.cos(Kz*X[1])+X[0]*((np.sin(Kr*(X[0]+r0))*np.cos(Kz*X[1]))**2
-                                    -PSI**2+np.exp(-np.sin(Kr*(X[0]+r0))*np.cos(Kz*X[1]))-np.exp(-PSI)))/(self.mu0*X[0])
+                Kr, Kz, r0 = self.coeffsNONLINEAR
+                Jphi = -((Kr**2+Kz**2)*PSI+(Kr/X[0])*np.cos(Kr*(X[0]+r0))*np.cos(Kz*X[1])+X[0]*(np.sin(Kr*(X[0]+r0))**2*np.cos(Kz*X[1])**2
+                            -PSI**2+np.exp(-np.sin(Kr*(X[0]+r0))*np.cos(Kz*X[1]))-np.exp(-PSI)))/(X[0]*self.mu0)
             
-            case 'ZHENG':
+            case self.ZHENG_CURRENT:
                 # COMPUTE PLASMA CURRENT MODEL BASED ON ZHENG PAPER
                 Jphi = (self.coeffsZHENG[4]*X[0]**2 - self.coeffsZHENG[5])/ (X[0]*self.mu0)
         
-            case "PROFILES":
+            case self.PROFILES_CURRENT:
                 ## OPTION WITH GAMMA APPLIED TO funG AND WITHOUT denom
                 Jphi = -X[0] * self.dPdPSI(PSI) - 0.5*self.dG2dPSI(PSI)/ (X[0]*self.mu0)
             
@@ -623,6 +663,32 @@ class GradShafranovCutFEM:
         # FUNCTION MODELING TOROIDAL FIELD FUNCTION DERIVATIVE IN PLASMA REGION
         dg = (self.G0**2)*self.n_g*(PSI**(self.n_g-1))
         return dg
+    
+    
+    def SourceTerm(self,X,PSI):
+        match self.PLASMA_CURRENT:
+            case self.LINEAR_CURRENT:
+                Xstar = X/self.R0
+                # COMPUTE LINEAR MODEL PLASMA CURRENT
+                source = Xstar[0]**2
+            
+            case self.NONLINEAR_CURRENT: 
+                Xstar = X/self.R0
+                # COMPUTE NONLINEAR MODEL PLASMA CURRENT
+                Kr, Kz, r0 = self.coeffsNONLINEAR
+                source = -((Kr**2+Kz**2)*PSI+(Kr/Xstar[0])*np.cos(Kr*(Xstar[0]+r0))*np.cos(Kz*Xstar[1])+Xstar[0]*(np.sin(Kr*(Xstar[0]+r0))**2*np.cos(Kz*Xstar[1])**2
+                            -PSI**2+np.exp(-np.sin(Kr*(Xstar[0]+r0))*np.cos(Kz*Xstar[1]))-np.exp(-PSI)))
+                
+            case self.ZHENG_CURRENT:
+                # COMPUTE PLASMA CURRENT MODEL BASED ON ZHENG PAPER
+                source = self.coeffsZHENG[4]*X[0]**2 - self.coeffsZHENG[5]
+                
+        if self.PLASMA_CURRENT == 'FAKE':
+            source = -4*np.sin(2*X[0]) + 0.6*X[1]
+
+        return source
+        
+        
     
     ##################################################################################################
     ###################################### LEVEL-SET DESCRIPTION #####################################
@@ -778,7 +844,7 @@ class GradShafranovCutFEM:
         
         """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PSI, PSI_B, ON BOUNDARY ELEMENT. 
         THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
-        FOR 'FREE' BOUNDARY PROBLEM, SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
+        FOR self.FREE_BOUNDARY BOUNDARY PROBLEM, SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
         FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
         INTEGRATE THE PLASMA'S GREEN FUNCTION."""
         
@@ -826,7 +892,7 @@ class GradShafranovCutFEM:
         PSI_B = np.zeros([self.NnFW])    
         # FOR FIXED PLASMA BOUNDARY PROBLEM THE VACUUM VESSEL BOUNDARY VALUES PSI_B ARE IRRELEVANT ->> PSI_B = 0
     
-        if self.PLASMA_BOUNDARY == 'FREE':
+        if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
             
             k = 0
             # COMPUTE PSI_B VALUE ON EACH VACUUM VESSEL ELEMENT FIRST WALL INTERFACE INTEGRATION POINTS
@@ -973,8 +1039,6 @@ class GradShafranovCutFEM:
                     
             # IF THERE EXISTS 'HIGH-ORDER' NODES WITH DIFFERENT PLASMA LEVEL-SET SIGN
             if DHONplasma:
-                print('yes plasma boundary')
-                print(ielem)
                 self.OLDplasmaBoundLevSet = self.PlasmaBoundLevSet.copy()
                 for inode in DHONplasma:  # LOOP OVER LOCAL INDICES 
                     self.Elements[ielem].PlasmaLSe[inode] *= -1 
@@ -982,8 +1046,6 @@ class GradShafranovCutFEM:
                      
             # IF THERE EXISTS 'HIGH-ORDER' NODES WITH DIFFERENT VACUUM VESSEL LEVEL-SET SIGN
             if DHONvessel:
-                print('yes vacuum vessel')
-                print(ielem)
                 for inode in DHONvessel:  # LOOP OVER LOCAL INDICES 
                     self.Elements[ielem].VacVessLSe[inode] *= -1 
                     self.VacVessWallLevSet[self.Elements[ielem].Te[inode]] *= -1
@@ -996,7 +1058,7 @@ class GradShafranovCutFEM:
         self.ExteriorElems = self.ExteriorElems[:kext]
         
         # GATHER NON-CUT ELEMENTS AND CUT ELEMENTS 
-        if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+        if self.VACUUM_VESSEL == self.COMPUTATIONAL:
             self.NonCutElems = np.concatenate((self.PlasmaElems, self.VacuumElems, self.VacVessWallElems), axis=0)
             self.CutElems = self.PlasmaBoundElems
         else:
@@ -1091,7 +1153,6 @@ class GradShafranovCutFEM:
             else:
                 return "SADDLE POINT"
             
-        
         # 1. INTERPOLATE PSI VALUES ON A FINER STRUCTURED MESH USING PSI ON NODES
         # DEFINE FINER STRUCTURED MESH
         Mr = 60
@@ -1137,7 +1198,7 @@ class GradShafranovCutFEM:
         self.PSI_0 = self.Elements[int(self.Xcrit[1,0,-1])].ElementalInterpolation(self.Xcrit[1,0,:-1],PSI[self.Elements[int(self.Xcrit[1,0,-1])].Te]) 
         print('LOCAL EXTREMUM AT ',self.Xcrit[1,0,:-1],' (ELEMENT ', int(self.Xcrit[1,0,-1]),') WITH VALUE PSI_0 = ',self.PSI_0)
             
-        if self.PLASMA_BOUNDARY == "FREE":
+        if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
             # 3. LOOK FOR SADDLE POINT
             sol = optimize.root(gradPSI, X0_saddle, args=(Rfine,Zfine,gradPSIfine))
             if sol.success == True:
@@ -1167,7 +1228,7 @@ class GradShafranovCutFEM:
     
     def NormalisePSI(self):
         # NORMALISE SOLUTION OBTAINED FROM SOLVING CutFEM SYSTEM OF EQUATIONS USING CRITICAL PSI VALUES, PSI_0 AND PSI_X
-        if self.PLASMA_BOUNDARY == "FREE" or self.PLASMA_CURRENT == "PROFILES":
+        if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY or self.PLASMA_CURRENT == self.PROFILES_CURRENT:
             for i in range(self.Nn):
                 self.PSI_NORM[i,1] = (self.PSI[i]-self.PSI_X)/np.abs(self.PSI_0-self.PSI_X)
         else: 
@@ -1182,15 +1243,15 @@ class GradShafranovCutFEM:
     
     def ComputeTotalPlasmaCurrentNormalization(self):
         """ Function that computes the correction factor so that the total current flowing through the plasma region is constant and equal to input file parameter TOTAL_CURRENT. """
-        
-        # COMPUTE TOTAL PLASMA CURRENT    
-        Tcurrent = self.ComputeTotalPlasmaCurrent()
-        print('Total plasma current computed = ', Tcurrent)    
-        # COMPUTE TOTAL PLASMA CURRENT CORRECTION FACTOR            
-        self.gamma = self.TOTAL_CURRENT/Tcurrent
-        print("Total plasma current normalization factor = ", self.gamma)
-        # COMPUTED NORMALISED TOTAL PLASMA CURRENT
-        print("Normalised total plasma current = ", Tcurrent*self.gamma)
+        if self.PLASMA_CURRENT == self.PROFILES_CURRENT:
+            # COMPUTE TOTAL PLASMA CURRENT    
+            Tcurrent = self.ComputeTotalPlasmaCurrent()
+            print('Total plasma current computed = ', Tcurrent)    
+            # COMPUTE TOTAL PLASMA CURRENT CORRECTION FACTOR            
+            self.gamma = self.TOTAL_CURRENT/Tcurrent
+            print("Total plasma current normalization factor = ", self.gamma)
+            # COMPUTED NORMALISED TOTAL PLASMA CURRENT
+            print("Normalised total plasma current = ", Tcurrent*self.gamma)
         
         return
     
@@ -1271,16 +1332,17 @@ class GradShafranovCutFEM:
                     EDGE.PSI_g = np.zeros([EDGE.Ngaussint])
                     # FOR EACH INTEGRATION POINT ON THE PLASMA/VACUUM INTERFACE EDGE
                     for point in range(EDGE.Ngaussint):
-                        if self.PLASMA_CURRENT == 'NONLINEAR':
+                        if self.PLASMA_CURRENT == self.NONLINEAR_CURRENT:
                             EDGE.PSI_g[point] = self.PSIAnalyticalSolution(EDGE.Xgint[point,:],self.PLASMA_CURRENT)
-                        elif self.PLASMA_CURRENT == 'PROFILES':
+                        elif self.PLASMA_CURRENT == self.PROFILES_CURRENT:
                             EDGE.PSI_g[point] = self.PSI_X
                         else:
-                            EDGE.PSI_g[point] = 0
+                            #EDGE.PSI_g[point] = 0
+                            EDGE.PSI_g[point] = self.PSIAnalyticalSolution(EDGE.Xgint[point,:],self.PLASMA_CURRENT)
                 
         elif INTERFACE == "FIRST WALL":
             # FOR FIXED PLASMA BOUNDARY, THE VACUUM VESSEL BOUNDARY PSI_B = 0, THUS SO ARE ALL ELEMENTAL VALUES  ->> PSI_Be = 0
-            if self.PLASMA_BOUNDARY == 'FIXED':  
+            if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY:  
                 for elem in self.VacVessWallElems:
                     for edge in range(self.Elements[elem].Neint):
                         #self.Elements[elem].InterEdges[edge].PSI_g = np.zeros([self.Elements[elem].InterEdges[edge].Ngaussint])
@@ -1288,13 +1350,10 @@ class GradShafranovCutFEM:
                         EDGE = self.Elements[elem].InterEdges[edge]
                         # COMPUTE INTERFACE CONDITIONS PSI_D
                         EDGE.PSI_g = np.zeros([EDGE.Ngaussint])
-                        # FOR EACH INTEGRATION POINT ON THE PLASMA/VACUUM INTERFACE EDGE
-                        for point in range(EDGE.Ngaussint):
-                            EDGE.PSI_g[point] = 0
             
             # FOR FREE PLASMA BOUNDARY, THE VACUUM VESSEL BOUNDARY PSI_B VALUES ARE COMPUTED FROM THE GRAD-SHAFRANOV OPERATOR'S GREEN FUNCTION
             # IN ROUTINE COMPUTEPSI_B, HERE WE NEED TO SEND TO EACH BOUNDARY ELEMENT THE PSI_B VALUES OF THEIR CORRESPONDING BOUNDARY NODES
-            elif self.PLASMA_BOUNDARY == 'FREE':  
+            elif self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:  
                 k = 0
                 # FOR EACH ELEMENT CONTAINING THE VACUUM VESSEL FIRST WALL
                 for elem in self.VacVessWallElems:
@@ -1348,7 +1407,7 @@ class GradShafranovCutFEM:
         return integral
     
     def ComputeActiveNodes(self):
-        if self.PLASMA_BOUNDARY == "FIXED":
+        if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY:
             plasma_elems = np.concatenate((self.PlasmaBoundElems,self.PlasmaElems), axis=0)
             self.activenodes = set()
             for elem in plasma_elems:
@@ -1359,20 +1418,29 @@ class GradShafranovCutFEM:
             self.activenodes = range(self.Nn)
         return
     
+    def ComputePlasmaNodes(self):
+        self.plasmanodes = set()
+        for elem in self.PlasmaElems:
+            for node in self.T[elem,:]:
+                self.plasmanodes .add(node)
+        self.plasmanodes = np.array(list(self.plasmanodes))
+        
+        return
+        
+    
     
     ##################### INITIALISATION 
     
     def InitialGuess(self):
         """ This function computes the problem's initial guess, which is taken as the LINEAR CASE SOLUTION WITH SOME RANDOM NOISE. """
         PSI0 = np.zeros([self.Nn])
-        if self.PLASMA_CURRENT != 'PROFILES':      
+        if self.PLASMA_CURRENT == self.PROFILES_CURRENT: 
+            for i in range(self.Nn):
+                PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.LINEAR_CURRENT)*(-0.5)
+        else:     
             for i in range(self.Nn):
                 #PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.PLASMA_CURRENT)*2*random()
                 PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.PLASMA_CURRENT)
-        else:
-            for i in range(self.Nn):
-                PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],'LINEAR')*(-0.5)
-                
         return PSI0
     
     def InitialiseLevelSets(self):
@@ -1385,24 +1453,24 @@ class GradShafranovCutFEM:
                     -> ONLY NECESSARY WHEN VACUUM_VESSEL FIRST WALL IS OTHER THAN AS THE COMPUTATIONAL DOMAIN """
             
         self.PlasmaBoundLevSet = np.zeros([self.Nn])
-        if self.PLASMA_GEOMETRY == 'FIRST_WALL':  # IN THIS CASE, THE PLASMA REGION SHAPE IS TAKEN AS THE SHAPE OF THE TOKAMAK'S FIRST WALL
-            if self.PLASMA_CURRENT != 'ZHENG':
+        if self.PLASMA_GEOMETRY == self.FIRST_WALL:  # IN THIS CASE, THE PLASMA REGION SHAPE IS TAKEN AS THE SHAPE OF THE TOKAMAK'S FIRST WALL
+            if self.PLASMA_CURRENT == self.ZHENG_CURRENT:
                 for i in range(self.Nn):
-                    self.PlasmaBoundLevSet[i] = self.PSIAnalyticalSolution(self.X[i,:],'LINEAR')
+                    self.PlasmaBoundLevSet[i] = -self.PSIAnalyticalSolution(self.X[i,:],self.ZHENG_CURRENT)
             else: 
                 for i in range(self.Nn):
-                    self.PlasmaBoundLevSet[i] = -self.PSIAnalyticalSolution(self.X[i,:],'ZHENG')
+                    self.PlasmaBoundLevSet[i] = self.PSIAnalyticalSolution(self.X[i,:],self.LINEAR_CURRENT)
                 
-        elif self.PLASMA_GEOMETRY == "F4E":    # IN THIS CASE, THE PLASMA REGION SHAPE IS DESCRIBED USING THE F4E SHAPE CONTROL POINTS
+        elif self.PLASMA_GEOMETRY == self.F4E_BOUNDARY:    # IN THIS CASE, THE PLASMA REGION SHAPE IS DESCRIBED USING THE F4E SHAPE CONTROL POINTS
             self.PlasmaBoundLevSet = self.F4E_PlasmaBoundLevSet()
             
         self.VacVessWallLevSet = (-1)*np.ones([self.Nn])
-        if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+        if self.VACUUM_VESSEL == self.COMPUTATIONAL:
             for node_index in self.BoundaryNodes:
                 self.VacVessWallLevSet[node_index] = 0
-        elif self.VACUUM_VESSEL == "FIRST_WALL":
+        elif self.VACUUM_VESSEL == self.FIRST_WALL:
             for i in range(self.Nn):
-                self.VacVessWallLevSet[i] = self.PSIAnalyticalSolution(self.X[i,:],'LINEAR')
+                self.VacVessWallLevSet[i] = self.PSIAnalyticalSolution(self.X[i,:],self.LINEAR_CURRENT)
             
         return 
     
@@ -1432,9 +1500,7 @@ class GradShafranovCutFEM:
         self.UpdateElementalPSI_g('PLASMA/VACUUM')
         
         # COMPUTE INITIAL TOTAL PLASMA CURRENT CORRECTION FACTOR
-        if self.PLASMA_CURRENT == "PROFILES":
-            #self.gamma = 1
-            self.ComputeTotalPlasmaCurrentNormalization()
+        self.ComputeTotalPlasmaCurrentNormalization()
         
         ####### INITIALISE PSI_B UNKNOWN VECTORS
         # NODES ON VACUUM VESSEL FIRST WALL GEOMETRY FOR WHICH TO EVALUATE PSI_B VALUES == GAUSS INTEGRATION NODES ON FIRST WALL EDGES
@@ -1512,7 +1578,7 @@ class GradShafranovCutFEM:
     
     def ComputeFirstWallApproximation(self):
         """ APPROXIMATE/IDENTIFY LINEAR EDGES CONFORMING THE VACUUM VESSEL FIRST WALL GEOMETRY ON EACH EDGE. COMPUTE NORMAL VECTORS FOR EACH EDGE. """
-        if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+        if self.VACUUM_VESSEL == self.COMPUTATIONAL:
             for elem in self.VacVessWallElems:
                 # IDENTIFY COMPUTATIONAL DOMAIN'S BOUNDARIES CONFORMING VACUUM VESSEL FIRST WALL
                 self.Elements[elem].ComputationalDomainBoundaryEdges(self.Tbound)  
@@ -1567,7 +1633,7 @@ class GradShafranovCutFEM:
         for elem in self.CutElems:
             self.Elements[elem].ComputeModifiedQuadratures(self.QuadratureOrder)
         
-        if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":   
+        if self.VACUUM_VESSEL == self.COMPUTATIONAL:   
             # FOR BOUNDARY ELEMENTS COMPUTE BOUNDARY QUADRATURE ENTITIES TO INTEGRATE OVER BOUNDARY EDGES
             for elem in self.VacVessWallElems:
                 self.Elements[elem].ComputeComputationalDomainBoundaryQuadrature(self.QuadratureOrder)
@@ -1589,7 +1655,7 @@ class GradShafranovCutFEM:
                 - PLASMABOUNDARY ELEMENTS
                 - VACUUM ELEMENTS. """
                 
-        if self.PLASMA_BOUNDARY == "FREE":
+        if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
             # IN CASE WHERE THE NEW SADDLE POINT (N+1) CORRESPONDS (CLOSE TO) TO THE OLD SADDLE POINT, THEN THAT MEANS THAT THE PLASMA REGION
             # IS ALREADY WELL DEFINED BY THE OLD LEVEL-SET 
             
@@ -1683,14 +1749,10 @@ class GradShafranovCutFEM:
                 # MAP PSI VALUES FROM ELEMENT NODES TO GAUSS NODES
                 PSIg = ELEMENT.N @ ELEMENT.PSIe
                 for ig in range(self.Elements[elem].Ng2D):
-                    if self.PLASMA_CURRENT == "LINEAR" or self.PLASMA_CURRENT == "NONLINEAR":  # DIMENSIONLESS SOLUTION CASE
-                        Xg = ELEMENT.Xg2D[ig,:]/self.R0
-                    else:
-                        Xg = ELEMENT.Xg2D[ig,:]
-                    SourceTermg[ig] = self.mu0*Xg[0]*self.Jphi(Xg,PSIg[ig])
+                    SourceTermg[ig] = self.SourceTerm(ELEMENT.Xg2D[ig,:],PSIg[ig])
                     
             # COMPUTE ELEMENTAL MATRICES
-            if self.PLASMA_CURRENT == "LINEAR" or self.PLASMA_CURRENT == "NONLINEAR":  # DIMENSIONLESS SOLUTION CASE
+            if self.PLASMA_CURRENT == self.LINEAR_CURRENT or self.PLASMA_CURRENT == self.NONLINEAR_CURRENT:  # DIMENSIONLESS SOLUTION CASE
                 LHSe, RHSe = ELEMENT.IntegrateElementalDomainTerms(SourceTermg,self.R0)
             else:
                 LHSe, RHSe = ELEMENT.IntegrateElementalDomainTerms(SourceTermg)
@@ -1731,14 +1793,10 @@ class GradShafranovCutFEM:
                     # MAPP GAUSS NODAL PSI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
                     PSIg = SUBELEM.N @ ELEMENT.PSIe
                     for ig in range(SUBELEM.Ng2D):
-                        if self.PLASMA_CURRENT == "LINEAR" or self.PLASMA_CURRENT == "NONLINEAR":  # DIMENSIONLESS SOLUTION CASE
-                            Xg = SUBELEM.Xg2D[ig,:]/self.R0
-                        else:
-                            Xg = SUBELEM.Xg2D[ig,:]
-                        SourceTermg[ig] = self.mu0*Xg[0]*self.Jphi(Xg,PSIg[ig])
+                        SourceTermg[ig] = self.SourceTerm(SUBELEM.Xg2D[ig,:],PSIg[ig])
                         
                 # COMPUTE ELEMENTAL MATRICES
-                if self.PLASMA_CURRENT == "LINEAR" or self.PLASMA_CURRENT == "NONLINEAR":  # DIMENSIONLESS SOLUTION CASE
+                if self.PLASMA_CURRENT == self.LINEAR_CURRENT or self.PLASMA_CURRENT == self.NONLINEAR_CURRENT:  # DIMENSIONLESS SOLUTION CASE
                     LHSe, RHSe = SUBELEM.IntegrateElementalDomainTerms(SourceTermg,self.R0)
                 else:
                     LHSe, RHSe = SUBELEM.IntegrateElementalDomainTerms(SourceTermg)
@@ -1769,7 +1827,7 @@ class GradShafranovCutFEM:
             # ISOLATE ELEMENT 
             ELEMENT = self.Elements[elem]
             # COMPUTE ELEMENTAL MATRICES
-            if self.PLASMA_CURRENT == "LINEAR" or self.PLASMA_CURRENT == "NONLINEAR":  # DIMENSIONLESS SOLUTION CASE
+            if self.PLASMA_CURRENT == self.LINEAR_CURRENT or self.PLASMA_CURRENT == self.NONLINEAR_CURRENT:  # DIMENSIONLESS SOLUTION CASE
                 LHSe,RHSe = ELEMENT.IntegrateElementalInterfaceTerms(self.beta,self.R0)
             else: 
                 LHSe,RHSe = ELEMENT.IntegrateElementalInterfaceTerms(self.beta)
@@ -1793,7 +1851,7 @@ class GradShafranovCutFEM:
         # IN THE CASE WHERE THE VACUUM VESSEL FIRST WALL CORRESPONDS TO THE COMPUTATIONAL DOMAIN'S BOUNDARY, ELEMENTS CONTAINING THE FIRST WALL ARE NOT CUT ELEMENTS 
         # BUT STILL WE NEED TO INTEGRATE ALONG THE COMPUTATIONAL DOMAIN'S BOUNDARY BOUNDARY 
         
-        if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+        if self.VACUUM_VESSEL == self.COMPUTATIONAL:
             
             if self.ELMAT_output:
                 self.ELMAT_file.write('BOUNDARY_ELEMENTS_INTERFACE\n')
@@ -1802,7 +1860,7 @@ class GradShafranovCutFEM:
                 # ISOLATE ELEMENT 
                 ELEMENT = self.Elements[elem]
                 # COMPUTE ELEMENTAL MATRICES
-                if self.PLASMA_CURRENT == "LINEAR" or self.PLASMA_CURRENT == "NONLINEAR":  # DIMENSIONLESS SOLUTION CASE
+                if self.PLASMA_CURRENT == self.LINEAR_CURRENT or self.PLASMA_CURRENT == self.NONLINEAR_CURRENT:  # DIMENSIONLESS SOLUTION CASE
                     LHSe,RHSe = ELEMENT.IntegrateElementalInterfaceTerms(self.beta,self.R0)
                 else:
                     LHSe,RHSe = ELEMENT.IntegrateElementalInterfaceTerms(self.beta)
@@ -1826,7 +1884,7 @@ class GradShafranovCutFEM:
         if self.ELMAT_output:
             self.ELMAT_file.write('END_ELEMENTAL_MATRICES_FILE\n')
             self.ELMAT_file.close()
-                
+        
         print("Done!") 
         
         if self.GlobalSystem_output:
@@ -1844,8 +1902,38 @@ class GradShafranovCutFEM:
     
     def SolveSystem(self):
         # SOLVE LINEAR SYSTEM OF EQUATIONS AND OBTAIN PSI
-        self.PSI = np.linalg.solve(self.LHS, self.RHS)
+        if self.PLASMA_BOUNDARY == "FIXE":
+            self.PSI = np.zeros([self.Nn,1])
+            LHSred, RHSred, plasmaboundnodes, unknownodes = self.StrongBCimposition()
+            unknowns = np.linalg.solve(LHSred, RHSred)
+            for inode, val in enumerate(unknowns):
+                self.PSI[unknownodes[inode]] = val
+            for node in plasmaboundnodes:
+                self.PSI[node] = self.PSIAnalyticalSolution(self.X[node,:],self.PLASMA_CURRENT)
+        else:
+            self.PSI = np.linalg.solve(self.LHS, self.RHS)
         return
+    
+    def StrongBCimposition(self):
+        # WE STRONGLY IMPOSE ANALYTICAL SOLUTION VALUES ON THE NODES FROM PLASMA BOUNDARY ELEMENTS
+        RHS_temp = self.RHS.copy()
+        # 1. FIND PLASMA BOUNDARY NODES
+        plasmaboundnodes = set()
+        for elem in self.PlasmaBoundElems:
+            for node in self.Elements[elem].Te:
+                plasmaboundnodes.add(node)
+        plasmaboundnodes = np.array(list(plasmaboundnodes))
+        # 2. STRONGLY IMPOSE BC BY PASSING LHS COLUMNS TO RHS
+        unknownodes = list(range(self.Nn)) 
+        for node in plasmaboundnodes:
+            nodeval = self.PSIAnalyticalSolution(self.X[node,:],self.PLASMA_CURRENT)
+            RHS_temp[:,0] -= nodeval*self.LHS[:,node]
+            unknownodes.remove(node)
+        # 3. REDUCE GLOBAL SYSTEM
+        LHSred = self.LHS[np.ix_(unknownodes,unknownodes)]
+        RHSred = RHS_temp[unknownodes,:]
+        
+        return LHSred, RHSred, plasmaboundnodes, unknownodes
     
     def StorePSIValues(self):
         self.PSI_NORM_ALL[:,self.it] = self.PSI_NORM[:,0]   
@@ -1948,24 +2036,26 @@ class GradShafranovCutFEM:
         self.PARAMS_file.write('\n')
         
         self.PARAMS_file.write('PROBLEM_TYPE_PARAMETERS\n')
-        self.PARAMS_file.write("    PLASMA_BOUNDARY_equ = " + self.PLASMA_BOUNDARY)
-        self.PARAMS_file.write("    PLASMA_GEOMETRY_equ = " + self.PLASMA_GEOMETRY)
-        self.PARAMS_file.write("    PLASMA_CURRENT_equ = " + self.PLASMA_CURRENT)
-        self.PARAMS_file.write("    VACUUM_VESSEL_equ = " + self.VACUUM_VESSEL)
+        self.PARAMS_file.write("    PLASMA_BOUNDARY_equ = {:d}\n".format(self.PLASMA_BOUNDARY))
+        self.PARAMS_file.write("    PLASMA_GEOMETRY_equ = {:d}\n".format(self.PLASMA_GEOMETRY))
+        if self.PLASMA_CURRENT == 'FAKE':
+            self.PARAMS_file.write("    PLASMA_CURRENT_equ = "+self.PLASMA_CURRENT )
+        else:
+            self.PARAMS_file.write("    PLASMA_CURRENT_equ = {:d}\n".format(self.PLASMA_CURRENT))
+        self.PARAMS_file.write("    VACUUM_VESSEL_equ = {:d}\n".format(self.VACUUM_VESSEL))
         self.PARAMS_file.write("    TOTAL_PLASMA_CURRENT = {:f}\n".format(self.TOTAL_CURRENT))
         self.PARAMS_file.write('END_PROBLEM_TYPE_PARAMETERS\n')
         self.PARAMS_file.write('\n')
         
         self.PARAMS_file.write('VACUUM_VESSEL_FIRST_WALL_GEOMETRY_PARAMETERS\n')
-        self.PARAMS_file.write("    R_MAX_equ = {:f}\n".format(self.Rmax))
-        self.PARAMS_file.write("    R_MIN_equ = {:f}\n".format(self.Rmin))
+        self.PARAMS_file.write("    R0_equ = {:f}\n".format(self.R0))
         self.PARAMS_file.write("    EPSILON_equ = {:f}\n".format(self.epsilon))
         self.PARAMS_file.write("    KAPPA_equ = {:f}\n".format(self.kappa))
         self.PARAMS_file.write("    DELTA_equ = {:f}\n".format(self.delta))
         self.PARAMS_file.write('END_VACUUM_VESSEL_FIRST_WALL_GEOMETRY_PARAMETERS\n')
         self.PARAMS_file.write('\n')
         
-        if self.PLASMA_GEOMETRY == 'F4E':
+        if self.PLASMA_GEOMETRY == self.F4E_BOUNDARY:
             self.PARAMS_file.write('PLASMA_REGION_GEOMETRY_PARAMETERS\n')
             self.PARAMS_file.write("    CONTROL_POINTS_equ = {:d}\n".format(self.CONTROL_POINTS))
             self.PARAMS_file.write("    R_SADDLE_equ = {:f}\n".format(self.R_SADDLE))
@@ -1979,7 +2069,7 @@ class GradShafranovCutFEM:
             self.PARAMS_file.write('END_PLASMA_REGION_GEOMETRY_PARAMETERS\n')
             self.PARAMS_file.write('\n')
         
-        if self.PLASMA_CURRENT == 'PROFILES':
+        if self.PLASMA_CURRENT == self.PROFILES_CURRENT:
             self.PARAMS_file.write('PLASMA_CURRENT_MODEL_PARAMETERS\n')
             self.PARAMS_file.write("    B0_equ = {:f}\n".format(self.B0))
             self.PARAMS_file.write("    q0_equ = {:f}\n".format(self.q0))
@@ -1989,7 +2079,7 @@ class GradShafranovCutFEM:
             self.PARAMS_file.write('END_PLASMA_CURRENT_MODEL_PARAMETERS\n')
             self.PARAMS_file.write('\n')
         
-        if self.PLASMA_BOUNDARY == 'FREE':
+        if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
             self.PARAMS_file.write('EXTERNAL_COILS_PARAMETERS\n')
             self.PARAMS_file.write("    N_COILS_equ = {:d}\n".format(self.Ncoils))
             for icoil in range(self.Ncoils):
@@ -2061,8 +2151,8 @@ class GradShafranovCutFEM:
     
     def writePSIcrit(self):
         self.PSIcrit_file.write("ITERATION {:d} (EXT_it = {:d}, INT_it = {:d})\n".format(self.it,self.it_EXT,self.it_INT))
-        self.PSIcrit_file.write("{:f}  {:f}  {:f}  {:f}".format(self.Xcrit[1,0,-1],self.Xcrit[1,0,0],self.Xcrit[1,0,1],self.PSI_0))
-        self.PSIcrit_file.write("{:f}  {:f}  {:f}  {:f}".format(self.Xcrit[1,1,-1],self.Xcrit[1,1,0],self.Xcrit[1,1,1],self.PSI_X))
+        self.PSIcrit_file.write("{:f}  {:f}  {:f}  {:f}\n".format(self.Xcrit[1,0,-1],self.Xcrit[1,0,0],self.Xcrit[1,0,1],self.PSI_0[0]))
+        self.PSIcrit_file.write("{:f}  {:f}  {:f}  {:f}\n".format(self.Xcrit[1,1,-1],self.Xcrit[1,1,0],self.Xcrit[1,1,1],self.PSI_X))
         self.PSIcrit_file.write('END_ITERATION\n')
         return
     
@@ -2086,6 +2176,31 @@ class GradShafranovCutFEM:
             self.VacVessLevSetVals_file.write("{:d} {:e}\n".format(inode+1,self.VacVessWallLevSet[inode]))
         return
     
+    def writeconvergedsolution(self):
+        self.L2error_file = open(self.outputdir+'/PSIconverged.dat', 'w')
+        self.L2error_file.write('PSI_CONVERGED_FIELD\n')
+        for inode in range(self.Nn):
+            self.L2error_file.write("{:d} {:e}\n".format(inode+1,self.PSI_CONV[inode])) 
+        self.L2error_file.write('END_PSI_CONVERGED_FIELD')
+        
+        AnaliticalNorm = np.zeros([self.Nn])
+        error = np.zeros([self.Nn])
+        for inode in range(self.Nn):
+            AnaliticalNorm[inode] = self.PSIAnalyticalSolution(self.X[inode,:],self.PLASMA_CURRENT)
+            error[inode] = abs(AnaliticalNorm[inode]-self.PSI_CONV[inode])
+            if error[inode] == 0:
+                error[inode] = 1e-15
+                
+        self.L2error_file.write('ERROR_FIELD\n')
+        for inode in range(self.Nn):
+            self.L2error_file.write("{:d} {:e}\n".format(inode+1,error[inode])) 
+        self.L2error_file.write('END_ERROR_FIELD\n')
+        
+        self.L2error_file.write("L2_error = {:e}".format(self.L2error))
+        
+        self.L2error_file.close()
+        return
+    
     
     ##################################################################################################
     ######################################## MAIN ALGORITHM ##########################################
@@ -2095,6 +2210,7 @@ class GradShafranovCutFEM:
         # READ INPUT FILES
         print("READ INPUT FILES...")
         self.ReadMesh()
+        self.ReadFixdata()
         self.ReadEQUILIdata()
         print('Done!')
         
@@ -2146,7 +2262,7 @@ class GradShafranovCutFEM:
                 ##################################
                 #self.PlotClassifiedElements_2()
                 # COMPUTE TOTAL PLASMA CURRENT CORRECTION FACTOR
-                if self.PLASMA_CURRENT == "PROFILES":
+                if self.PLASMA_CURRENT == self.PROFILES_CURRENT:
                     Tcurrent = self.ComputeTotalPlasmaCurrent()
                     print("Total plasma current = ", Tcurrent)
                 #self.PlotPROFILES()
@@ -2155,7 +2271,7 @@ class GradShafranovCutFEM:
                 self.SolveSystem()                          # 1. SOLVE CutFEM SYSTEM  ->> PSI
                 self.writePSI()
                 self.ComputeCriticalPSI(self.PSI)           # 2. COMPUTE CRITICAL VALUES   PSI_0 AND PSI_X
-                #self.writePSIcrit()
+                self.writePSIcrit()
                 self.NormalisePSI()                         # 3. NORMALISE PSI RESPECT TO CRITICAL VALUES  ->> PSI_NORM 
                 self.writePSI_NORM()
                 self.PlotPSI_PSINORM()
@@ -2179,10 +2295,45 @@ class GradShafranovCutFEM:
             #****************************************
         print('SOLUTION CONVERGED')
         #self.PlotSolution(self.PSI_CONV)
+        if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY and self.PLASMA_CURRENT != self.PROFILES_CURRENT:
+            self.L2error = self.ComputeL2error()
+            self.writeconvergedsolution()
         
         self.closeOUTPUTfiles()
         
         return
+    
+    def ComputeL2error(self):
+        L2error = 0
+        # INTEGRATE OVER PLASMA ELEMENTS
+        for elem in self.PlasmaElems:
+            # ISOLATE ELEMENT
+            ELEMENT = self.Elements[elem]
+            # MAPP GAUSS NODAL PSI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
+            PSIg = ELEMENT.N @ ELEMENT.PSIe
+            # LOOP OVER GAUSS NODES
+            for ig in range(ELEMENT.Ng2D):
+                # LOOP OVER ELEMENTAL NODES
+                for i in range(ELEMENT.n):
+                    L2error += (PSIg[ig]-self.PSIAnalyticalSolution(ELEMENT.Xg2D[ig,:],self.PLASMA_CURRENT))**2*ELEMENT.N[ig,i]*ELEMENT.detJg[ig]*ELEMENT.Wg2D[ig]
+                    
+        # INTEGRATE OVER INTERFACE ELEMENTS, FOR SUBELEMENTS INSIDE PLASMA REGION
+        for elem in self.PlasmaBoundElems:
+            # ISOLATE ELEMENT
+            ELEMENT = self.Elements[elem]
+            # LOOP OVER SUBELEMENTS
+            for SUBELEM in ELEMENT.SubElements:
+                # INTEGRATE IN SUBDOMAIN INSIDE PLASMA REGION
+                if SUBELEM.Dom < 0:
+                    # MAPP GAUSS NODAL PSI VALUES FROM REFERENCE ELEMENT TO PHYSICAL SUBELEMENT
+                    PSIg = SUBELEM.N @ ELEMENT.PSIe
+                    # LOOP OVER GAUSS NODES
+                    for ig in range(SUBELEM.Ng2D):
+                        # LOOP OVER ELEMENTAL NODES
+                        for i in range(SUBELEM.n):
+                            L2error += (PSIg[ig]-self.PSIAnalyticalSolution(SUBELEM.Xg2D[ig,:],self.PLASMA_CURRENT))**2*SUBELEM.N[ig,i]*SUBELEM.detJg[ig]*SUBELEM.Wg2D[ig] 
+                            
+        return L2error
     
     
     ##################################################################################################
@@ -2325,7 +2476,7 @@ class GradShafranovCutFEM:
             if ELEM.Dom == -1 or ELEM.Dom == 1 or ELEM.Dom == 3:
                 # PLOT QUADRATURE INTEGRATION POINTS
                 axs[1].scatter(ELEM.Xg2D[:,0],ELEM.Xg2D[:,1],marker='x',c='black')
-            elif ELEM.Dom == 2 and self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+            elif ELEM.Dom == 2 and self.VACUUM_VESSEL == self.COMPUTATIONAL:
                 # PLOT QUADRATURE INTEGRATION POINTS
                 axs[1].scatter(ELEM.Xg2D[:,0],ELEM.Xg2D[:,1],marker='x',c='black', zorder=5)
                 # PLOT INTERFACE INTEGRATION POINTS
@@ -2484,9 +2635,9 @@ class GradShafranovCutFEM:
         axs[0].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
         axs[0].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
         axs[1].set_xlim(5.5,7)
-        if self.PLASMA_GEOMETRY == "FIRST_WALL":
+        if self.PLASMA_GEOMETRY == self.FIRST_WALL:
             axs[1].set_ylim(2.5,3.5)
-        elif self.PLASMA_GEOMETRY == "F4E":
+        elif self.PLASMA_GEOMETRY == self.F4E_BOUNDARY:
             axs[1].set_ylim(1.8,3.5)
 
         for i in range(2):
@@ -2594,13 +2745,14 @@ class GradShafranovCutFEM:
         PSI_Dg = np.zeros([len(self.PlasmaBoundElems)*self.Ng1D])
         X_D = np.zeros([len(self.PlasmaBoundElems)*self.n,self.dim])
         PSI_D = np.zeros([len(self.PlasmaBoundElems)*self.n])
+        error = np.zeros([len(self.PlasmaBoundElems)*self.n])
         k = 0
         l = 0
         for elem in self.PlasmaBoundElems:
             for edge in range(self.Elements[elem].Neint):
                 for point in range(self.Elements[elem].InterEdges[edge].Ngaussint):
                     X_Dg[k,:] = self.Elements[elem].InterEdges[edge].Xgint[point]
-                    if self.PLASMA_CURRENT != 'PROFILES':
+                    if self.PLASMA_CURRENT != self.PROFILES_CURRENT:
                         PSI_Dexact[k] = self.PSIAnalyticalSolution(X_Dg[k,:],self.PLASMA_CURRENT)
                     else:
                         PSI_Dexact[k] = self.Elements[elem].InterEdges[edge].PSI_g[point]
@@ -2608,10 +2760,12 @@ class GradShafranovCutFEM:
                     k += 1
             for node in range(self.Elements[elem].n):
                 X_D[l,:] = self.Elements[elem].Xe[node,:]
+                PSI_Dexact_node = self.PSIAnalyticalSolution(X_D[l,:],self.PLASMA_CURRENT)
                 PSI_D[l] = self.PSI[self.Elements[elem].Te[node]]
+                error[l] = np.abs(PSI_D[l]-PSI_Dexact_node)
                 l += 1
             
-        fig, axs = plt.subplots(1, 3, figsize=(18,6)) 
+        fig, axs = plt.subplots(1, 4, figsize=(18,6)) 
         # LEFT SUBPLOT: ANALYTICAL VALUES
         axs[0].set_aspect('equal')
         axs[0].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
@@ -2636,6 +2790,14 @@ class GradShafranovCutFEM:
         linecolors_D = cmap(norm(PSI_D))
         axs[2].scatter(X_D[:,0],X_D[:,1],color = linecolors_D)
         fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap),ax=axs[2])
+        
+        axs[3].set_aspect('equal')
+        axs[3].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
+        axs[3].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
+        norm = plt.Normalize(np.log(error).min(),np.log(error).max())
+        linecolors_error = cmap(norm(np.log(error)))
+        axs[3].scatter(X_D[:,0],X_D[:,1],color = linecolors_error)
+        fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap),ax=axs[3])
 
         plt.show()
         
@@ -2703,7 +2865,7 @@ class GradShafranovCutFEM:
             for i in range(self.n):
                 plt.plot([ELEMENT.Xe[i,0], ELEMENT.Xe[(i+1)%ELEMENT.n,0]], [ELEMENT.Xe[i,1], ELEMENT.Xe[(i+1)%ELEMENT.n,1]], color='darkturquoise', linewidth=1)
             # PLOT QUADRATURE INTEGRATION POINTS
-            if self.VACUUM_VESSEL == "COMPUTATIONAL_DOMAIN":
+            if self.VACUUM_VESSEL == self.COMPUTATIONAL:
                 plt.scatter(ELEMENT.Xg2D[:,0],ELEMENT.Xg2D[:,1],marker='x',c='darkturquoise')
             else:
                 for SUBELEM in ELEMENT.SubElements:
@@ -2724,36 +2886,43 @@ class GradShafranovCutFEM:
 
     
     def PlotError(self):
+        self.ComputePlasmaNodes()
         
-        AnaliticalNorm = np.zeros([len(self.activenodes)])
-        error = np.zeros([len(self.activenodes)])
-        for inode in range(len(self.activenodes)):
-            AnaliticalNorm[inode] = self.PSIAnalyticalSolution(self.X[self.activenodes[inode],:],self.PLASMA_CURRENT)
-            error[inode] = abs(AnaliticalNorm[inode]-self.PSI_CONV[self.activenodes[inode]])
+        AnaliticalNorm = np.zeros([self.Nn])
+        for inode in range(self.Nn):
+            AnaliticalNorm[inode] = self.PSIAnalyticalSolution(self.X[inode,:],self.PLASMA_CURRENT)
+           
+        error = np.zeros([len(self.plasmanodes)])
+        for i, inode in enumerate(self.plasmanodes):
+            error[i] = abs(AnaliticalNorm[inode]-self.PSI_CONV[inode])
+            if error[i] == 0:
+                error[i] = 1e-15
             
         print(np.linalg.norm(error))
             
         fig, axs = plt.subplots(1, 3, figsize=(16,5))
         axs[0].set_xlim(self.Xmin,self.Xmax)
         axs[0].set_ylim(self.Ymin,self.Ymax)
-        a = axs[0].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], AnaliticalNorm, levels=30)
+        a = axs[0].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], AnaliticalNorm[self.activenodes], levels=30)
         axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
-        axs[0].tricontour(self.X[self.activenodes,0],self.X[self.activenodes,1], AnaliticalNorm, levels=[0], colors = 'black')
+        axs[0].tricontour(self.X[self.activenodes,0],self.X[self.activenodes,1], AnaliticalNorm[self.activenodes], levels=[0], colors = 'black')
         plt.colorbar(a, ax=axs[0])
 
         axs[1].set_xlim(self.Xmin,self.Xmax)
         axs[1].set_ylim(self.Ymin,self.Ymax)
         a = axs[1].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], self.PSI_CONV[self.activenodes], levels=30)
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
-        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PSI_CONV, levels=[0], colors = 'black')
+        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PSI_CONV, levels=[0], colors = 'black')
         plt.colorbar(a, ax=axs[1])
 
         axs[2].set_xlim(self.Xmin,self.Xmax)
         axs[2].set_ylim(self.Ymin,self.Ymax)
-        a = axs[2].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], np.log(error), levels=30)
+        a = axs[2].tricontourf(self.X[self.plasmanodes,0],self.X[self.plasmanodes,1], np.log(error), levels=30)
         axs[2].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         plt.colorbar(a, ax=axs[2])
 
         plt.show()
         
         return
+    
+    
