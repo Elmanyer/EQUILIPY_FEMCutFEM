@@ -16,15 +16,15 @@ STRATEGY
 END_STRATEGY
 $-------------------------------------------------------------
 GEOMETRY
-  INCLUDE  TS-FIXED-1W-LINEAR-TRI10-FINE.geo.dat
-END_GEOMETRY  
+  INCLUDE  TS-CUTFEM-TRI10-FINE.geo.dat
+END_GEOMETRY
 $-------------------------------------------------------------
 SETS
   ELEME, ALL = 10
-  END_ELEME  
+  END_ELEME
 END_SETS
 $-------------------------------------------------------------
 BOUNDARY_CONDITIONS
-  INCLUDE  TS-FIXED-1W-LINEAR-TRI10-FINE.fix.dat  
+  INCLUDE  TS-CUTFEM-TRI10-FINE.fix.dat
 END_BOUNDARY_CONDITIONS
 $-------------------------------------------------------------

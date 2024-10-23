@@ -3,7 +3,7 @@ DIMENSIONS
   NODAL_POINTS=        12391
   ELEMENTS=             6090
   SPACE_DIMENSIONS=        2
-  TYPES_OF_ELEMENTS=       0,     11,      0,      0,      0
+  TYPES_OF_ELEMENTS=      11
   BOUNDARIES=            210
 END_DIMENSIONS
 $------------------------------------------------------------
@@ -17,16 +17,14 @@ END_STRATEGY
 $-------------------------------------------------------------
 GEOMETRY
   INCLUDE  TS-CUTFEM-TRI06-SUPERFINE.geo.dat
-END_GEOMETRY  
+END_GEOMETRY
 $-------------------------------------------------------------
 SETS
-  INCLUDE  TS-CUTFEM-TRI06-SUPERFINE.set.dat  
+  ELEME, ALL = 10
+  END_ELEME
 END_SETS
 $-------------------------------------------------------------
 BOUNDARY_CONDITIONS
-  INCLUDE  TS-CUTFEM-TRI06-SUPERFINE.fix.dat  
+  INCLUDE  TS-CUTFEM-TRI06-SUPERFINE.fix.dat
 END_BOUNDARY_CONDITIONS
-$-------------------------------------------------------------
-FIELDS
-END_FIELDS
 $-------------------------------------------------------------

@@ -17,16 +17,14 @@ END_STRATEGY
 $-------------------------------------------------------------
 GEOMETRY
   INCLUDE  TS-CUTFEM-TRI03-ULTRAFINE-REDUCED.geo.dat
-END_GEOMETRY  
+END_GEOMETRY
 $-------------------------------------------------------------
 SETS
-  INCLUDE  TS-CUTFEM-TRI03-ULTRAFINE-REDUCED.set.dat  
+  ELEME, ALL = 10
+  END_ELEME
 END_SETS
 $-------------------------------------------------------------
 BOUNDARY_CONDITIONS
-  INCLUDE  TS-CUTFEM-TRI03-ULTRAFINE-REDUCED.fix.dat  
+  INCLUDE  TS-CUTFEM-TRI03-ULTRAFINE-REDUCED.fix.dat
 END_BOUNDARY_CONDITIONS
-$-------------------------------------------------------------
-FIELDS
-END_FIELDS
 $-------------------------------------------------------------

@@ -3,7 +3,7 @@ DIMENSIONS
   NODAL_POINTS=        13959
   ELEMENTS=             3430
   SPACE_DIMENSIONS=        2
-  TYPES_OF_ELEMENTS=       0,      0,      0,      0,     14
+  TYPES_OF_ELEMENTS=      14
   BOUNDARIES=            238
 END_DIMENSIONS
 $------------------------------------------------------------
@@ -17,16 +17,14 @@ END_STRATEGY
 $-------------------------------------------------------------
 GEOMETRY
   INCLUDE  TS-CUTFEM-QUA09-FINE.geo.dat
-END_GEOMETRY  
+END_GEOMETRY
 $-------------------------------------------------------------
 SETS
-  INCLUDE  TS-CUTFEM-QUA09-FINE.set.dat  
+  ELEME, ALL = 10
+  END_ELEME
 END_SETS
 $-------------------------------------------------------------
 BOUNDARY_CONDITIONS
-  INCLUDE  TS-CUTFEM-QUA09-FINE.fix.dat  
+  INCLUDE  TS-CUTFEM-QUA09-FINE.fix.dat
 END_BOUNDARY_CONDITIONS
-$-------------------------------------------------------------
-FIELDS
-END_FIELDS
 $-------------------------------------------------------------
