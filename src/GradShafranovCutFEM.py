@@ -23,7 +23,7 @@ class GradShafranovCutFEM:
     def __init__(self,MESH,CASE):
         # WORKING DIRECTORY
         pwd = os.getcwd()
-        self.pwd = pwd[:pwd.rfind("EQUILI_PY")+9]
+        self.pwd = pwd[:pwd.rfind("EQUILIPY")+9]
         
         # INPUT FILES:
         self.mesh_folder = self.pwd + '/MESHES/' + MESH
@@ -1498,8 +1498,8 @@ class GradShafranovCutFEM:
                 PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.LINEAR_CURRENT)*(-0.5)
         else:     
             for i in range(self.Nn):
-                #PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.PLASMA_CURRENT)*2*random()
-                PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.PLASMA_CURRENT)
+                PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.PLASMA_CURRENT)*2*random()
+                #PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.PLASMA_CURRENT)
         return PSI0
     
     def InitialiseLevelSets(self):
@@ -1726,13 +1726,7 @@ class GradShafranovCutFEM:
                 # . RECALL THAT PLASMA REGION IS DEFINED BY NEGATIVE VALUES OF LEVEL-SET -> NEED TO INVERT SIGN
                 # . CLOSED GEOMETRY DEFINED BY 0-LEVEL CONTOUR BENEATH ACTIVE SADDLE POINT (DIVERTOR REGION) NEEDS TO BE
                 #   DISCARTED BECAUSE THE LEVEL-SET DESCRIBES ONLY THE PLASMA REGION GEOMETRY -> NEED TO POST-PROCESS CUTFEM
-                #   SOLUTION IN ORDER TO TAKE ITS 0-LEVEL CONTOUR ENCLOSING ONLY THE PLASMA REGION. 
-                
-                # 1. INVERT SIGN DEPENDING ON SOLUTION PLASMA REGION SIGN
-                if self.PSI_0 > 0: # WHEN THE OBTAINED SOLUTION IS POSITIVE INSIDE THE PLASMA
-                    self.PlasmaBoundLevSet = -self.PSI_NORM[:,1].copy()
-                else: # WHEN THE OBTAINED SOLUTION IS NEGATIVE INSIDE THE PLASMA
-                    self.PlasmaBoundLevSet = self.PSI_NORM[:,1].copy() 
+                #   SOLUTION IN ORDER TO TAKE ITS 0-LEVEL CONTOUR ENCLOSING ONLY THE PLASMA REGION.  
                   
                 """  
                 # 2. DISCARD DIVERTOR ENCLOSED REGION (BENEATH ACTIVE SADDLE POINT)
@@ -1771,7 +1765,7 @@ class GradShafranovCutFEM:
                 
                 # OBTAIN POINTS CONFORMING THE NEW PLASMA DOMAIN BOUNDARY
                 fig, ax = plt.subplots(figsize=(6, 8))
-                cs = ax.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0])
+                cs = ax.tricontour(self.X[:,0],self.X[:,1], self.PSI_NORM[:,1], levels=[0])
                 
                 paths = list()
                 for item in cs.collections:
@@ -1829,19 +1823,17 @@ class GradShafranovCutFEM:
                 polygon_path = mpath.Path(plasmaboundary)
                 # Check if the mesh points are inside the new plasma domain
                 inside = polygon_path.contains_points(self.X)
+                
+                # 1. INVERT SIGN DEPENDING ON SOLUTION PLASMA REGION SIGN
+                if self.PSI_0 > 0: # WHEN THE OBTAINED SOLUTION IS POSITIVE INSIDE THE PLASMA
+                    self.PlasmaBoundLevSet = -self.PSI_NORM[:,1].copy()
+                else: # WHEN THE OBTAINED SOLUTION IS NEGATIVE INSIDE THE PLASMA
+                    self.PlasmaBoundLevSet = self.PSI_NORM[:,1].copy()
 
-                # FOR POINTS OUTSIDE THE PLASMA
+                # 2. DISCARD POINTS OUTSIDE THE PLASMA REGION
                 for inode in range(self.Nn):
                     if not inside[inode]:
                         self.PlasmaBoundLevSet[inode] = np.abs(self.PlasmaBoundLevSet[inode])
-                    
-                                        
-                fig, ax = plt.subplots(figsize=(4, 5))
-                ax.tricontourf(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=50)
-                ax.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0])
-                      
-                        
-                #self.PlotLevelSetEvolution(Zlow,Rleft)
 
                 ###### UPDATE PLASMA REGION LEVEL-SET ELEMENTAL VALUES     
                 for ELEMENT in self.Elements:
@@ -2391,17 +2383,16 @@ class GradShafranovCutFEM:
         self.ReadEQUILIdata()
         print('Done!')
         
-        #self.output_file = open('OUTPUT.dat', 'w')
-        
         # OUTPUT RESULTS FOLDER
         # Check if the directory exists
         if not os.path.exists(self.outputdir):
             # Create the directory
             os.makedirs(self.outputdir)
-            
+        # COPY SIMULATION FILES
         self.copysimfiles()
-        
+        # WRITE SIMULATION PARAMETERS FILE (IF ON)
         self.writeparams() 
+        # OPEN OUTPUT FILES
         self.openOUTPUTfiles()    
                 
         # INITIALIZATION
@@ -2413,7 +2404,7 @@ class GradShafranovCutFEM:
         print('Done!')
 
         if self.plotPSI_output:
-            self.PlotSolution(self.PSI_NORM[:,0])  # PLOT INITIAL SOLUTION
+            self.PlotSolutionPSI()  # PLOT INITIAL SOLUTION
 
         # START DOBLE LOOP STRUCTURE
         print('START ITERATION...')
@@ -2450,7 +2441,7 @@ class GradShafranovCutFEM:
                 self.NormalisePSI()                         # 3. NORMALISE PSI RESPECT TO CRITICAL VALUES  ->> PSI_NORM 
                 self.writePSI_NORM()                        #    WRITE NORMALISED SOLUTION
                 if self.plotPSI_output:
-                    self.PlotPSI_PSINORM()                  #    PLOT SOLUTION AND NORMALISED SOLUTION
+                    self.PlotSolutionPSI()                  #    PLOT SOLUTION AND NORMALISED SOLUTION
                 self.CheckConvergence('PSI_NORM')           # 4. CHECK CONVERGENCE OF PSI_NORM FIELD
                 self.writeresidu("INTERNAL")                #    WRITE INTERNAL LOOP RESIDU
                 self.UpdateElements()                       # 5. UPDATE MESH ELEMENTS CLASSIFACTION RESPECT TO NEW PLASMA BOUNDARY LEVEL-SET
@@ -2477,7 +2468,7 @@ class GradShafranovCutFEM:
             #######################################################
             
         print('SOLUTION CONVERGED')
-        self.PlotSolution(self.PSI_CONV)
+        self.PlotSolutionPSI()
         
         if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY and self.PLASMA_CURRENT != self.PROFILES_CURRENT:
             self.L2error = self.ComputeL2error()
@@ -2490,99 +2481,83 @@ class GradShafranovCutFEM:
     ############################### RENDERING AND REPRESENTATION #####################################
     ##################################################################################################
     
-    def PlotSolution(self,PSI):
+    def PlotFIELD(self,FIELD):
         
-        if len(np.shape(PSI)) == 2:
-            PSI = PSI[:,0]
         fig, axs = plt.subplots(1, 1, figsize=(5,5))
         axs.set_xlim(self.Xmin,self.Xmax)
         axs.set_ylim(self.Ymin,self.Ymax)
-        a = axs.tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], PSI[self.activenodes], levels=30)
-        axs.tricontour(self.X[self.activenodes,0],self.X[self.activenodes,1], PSI[self.activenodes], levels=[0], colors = 'black')
+        a = axs.tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], FIELD[self.activenodes], levels=30)
+        axs.tricontour(self.X[self.activenodes,0],self.X[self.activenodes,1], FIELD[self.activenodes], levels=[0], colors = 'black')
         axs.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         if self.VACUUM_VESSEL == self.FIRST_WALL:
             axs.tricontour(self.X[:,0],self.X[:,1], self.VacVessWallLevSet, levels=[0], colors = 'orange')
         plt.colorbar(a, ax=axs)
         plt.show()
-        return
-    
-    def PlotJphi_JphiNORM(self):
-        
-        fig, axs = plt.subplots(1, 2, figsize=(11,5))
-        
-        for i in range(2):
-            axs[i].set_xlim(self.Xmin, self.Xmax)
-            axs[i].set_ylim(self.Ymin, self.Ymax)
-        
-        Jphi = np.zeros([self.Nn])
-        Jphi_norm = np.zeros([self.Nn])
-        for i in range(self.Nn):
-            Jphi[i] = self.Jphi(self.X[i,:],self.PSI_NORM[i,0])
-            Jphi_norm[i] = Jphi[i]*self.gamma
-        
-        # LEFT PLOT: PLASMA CURRENT Jphi 
-        a0 = axs[0].tricontourf(self.X[:,0],self.X[:,1], Jphi, levels=50)
-        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
-        axs[0].set_title("PLASMA CURRENT Jphi")
-        plt.colorbar(a0, ax=axs[0])
-        
-        # RIGHT PLOT: NORMALIZED PLASMA CURRENT Jphi_NORM
-        a1 = axs[1].tricontourf(self.X[:,0],self.X[:,1], Jphi_norm, levels=50)
-        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
-        axs[1].yaxis.set_visible(False)
-        axs[1].set_title("NORMALIZED PLASMA CURRENT Jphi")
-        plt.colorbar(a1, ax=axs[1])
         
         return
+
     
-    
-    def PlotPSI_PSINORM(self):
-        """ FUNCTION WHICH PLOTS THE FIELD VALUES FOR PSI, OBTAINED FROM SOLVING THE CUTFEM SYSTEM, AND PSI_NORM (NORMALISED PSI). """
+    def PlotSolutionPSI(self):
+        """ FUNCTION WHICH PLOTS THE FIELD VALUES FOR PSI, OBTAINED FROM SOLVING THE CUTFEM SYSTEM, 
+        AND PSI_NORM IF NORMALISED. """
         
-        fig, axs = plt.subplots(1, 2, figsize=(11,5))
-        for i in range(2):
-            axs[i].set_xlim(self.Xmin, self.Xmax)
-            axs[i].set_ylim(self.Ymin, self.Ymax)
+        def subplotfield(self,ax,field):
+            a = ax.tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], field[self.activenodes], levels=50)
+            ax.tricontour(self.X[:,0],self.X[:,1], field, levels=[0], colors = 'black')
+            ax.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+            if self.VACUUM_VESSEL == self.FIRST_WALL:
+                ax.tricontour(self.X[:,0],self.X[:,1], self.VacVessWallLevSet, levels=[0], colors = 'orange')
+            ax.set_xlim(self.Xmin, self.Xmax)
+            ax.set_ylim(self.Ymin, self.Ymax)
+            plt.colorbar(a, ax=ax)
+            return
         
-        # CENTRAL PLOT: PSI at iteration N+1 WITHOUT NORMALISATION (SOLUTION OBTAINED BY SOLVING CUTFEM SYSTEM)
-        a0 = axs[0].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], self.PSI[self.activenodes,0], levels=50)
-        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PSI[:,0], levels=[0], colors = 'black')
-        axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
-        if self.VACUUM_VESSEL == self.FIRST_WALL:
-            axs[0].tricontour(self.X[:,0],self.X[:,1], self.VacVessWallLevSet, levels=[0], colors = 'orange')
-        axs[0].set_title('POLOIDAL MAGNETIC FLUX PSI')
-        plt.colorbar(a0, ax=axs[0])
+        if self.PLASMA_CURRENT == self.PROFILES_CURRENT:
+            psi_sol = " normalised solution PSI_NORM"
+        else:
+            psi_sol = " solution PSI"
         
-        # RIGHT PLOT: PSI at iteration N+1 WITH NORMALISATION
-        a1 = axs[1].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], self.PSI_NORM[self.activenodes,1], levels=50)
-        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PSI_NORM[:,1], levels=[0], colors = 'black')
-        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
-        if self.VACUUM_VESSEL == self.FIRST_WALL:
-            axs[1].tricontour(self.X[:,0],self.X[:,1], self.VacVessWallLevSet, levels=[0], colors = 'orange')
-        axs[1].set_title('NORMALIZED POLOIDAL MAGNETIC FLUX PSI_NORM')
-        axs[1].yaxis.set_visible(False)
-        plt.colorbar(a1, ax=axs[1])
-        
-        ## PLOT LOCATION OF CRITICAL POINTS
-        for i in range(2):
-            # LOCAL EXTREMUM
-            axs[i].scatter(self.Xcrit[1,0,0],self.Xcrit[1,0,1],marker = 'x',color='red', s = 40, linewidths = 2)
-            # SADDLE POINT
-            axs[i].scatter(self.Xcrit[1,1,0],self.Xcrit[1,1,1],marker = 'x',color='green', s = 40, linewidths = 2)
-        
-        ## PLOT ELEMENTS CONTAINING CRITICAL POINTS
-        # LOCAL EXTREMUM
-        ELEMENT = self.Elements[int(self.Xcrit[1,0,-1])]
-        for j in range(ELEMENT.n):
-            axs[0].plot([ELEMENT.Xe[j,0], ELEMENT.Xe[int((j+1)%ELEMENT.n),0]],[ELEMENT.Xe[j,1], ELEMENT.Xe[int((j+1)%ELEMENT.n),1]], color='red', linewidth=1) 
-        # SADDLE POINT
-        ELEMENT = self.Elements[int(self.Xcrit[1,1,-1])]
-        for j in range(ELEMENT.n):
-            axs[0].plot([ELEMENT.Xe[j,0], ELEMENT.Xe[int((j+1)%ELEMENT.n),0]],[ELEMENT.Xe[j,1], ELEMENT.Xe[int((j+1)%ELEMENT.n),1]], color='green', linewidth=1) 
-        
-        plt.show()
+        if self.it == 0:  # INITIAL GUESS PLOT
+            fig, axs = plt.subplots(1, 1, figsize=(6,5))
+            subplotfield(self,axs,self.PSI_NORM[:,0])
+            axs.set_title('Initial PSI guess')
+            plt.show(block=False)
+            plt.pause(0.8)
+            
+        elif self.converg_EXT:  # CONVERGED SOLUTION PLOT
+            fig, axs = plt.subplots(1, 1, figsize=(6,5))
+            subplotfield(self,axs,self.PSI_CONV)
+            axs.set_title('Converged'+psi_sol)
+            plt.show()
+            
+        elif self.PLASMA_CURRENT == self.PROFILES_CURRENT:  # ITERATION SOLUTION FOR PROFILES PLASMA CURRENT (PLOT PSI and PSI_NORM)
+            fig, axs = plt.subplots(1, 2, figsize=(11,5))
+            # LEFT PLOT: PSI at iteration N+1 WITHOUT NORMALISATION (SOLUTION OBTAINED BY SOLVING CUTFEM SYSTEM)
+            subplotfield(self,axs[0],self.PSI[:,0])
+            axs[0].set_title('Poloidal magnetic flux PSI')
+            # RIGHT PLOT: NORMALISED PSI at iteration N+1
+            subplotfield(self,axs[1],self.PSI_NORM[:,1])
+            axs[1].set_title('Normalised poloidal magnetic flux PSI_NORM')
+            axs[1].yaxis.set_visible(False)
+            ## PLOT LOCATION OF CRITICAL POINTS
+            for i in range(2):
+                # LOCAL EXTREMUM
+                axs[i].scatter(self.Xcrit[1,0,0],self.Xcrit[1,0,1],marker = 'x',color='red', s = 40, linewidths = 2)
+                # SADDLE POINT
+                axs[i].scatter(self.Xcrit[1,1,0],self.Xcrit[1,1,1],marker = 'x',color='green', s = 40, linewidths = 2)
+            plt.suptitle("Iteration n = "+str(self.it))
+            plt.show(block=False)
+            plt.pause(0.8)
+                
+        else:  # ITERATION SOLUTION FOR ANALYTICAL PLASMA CURRENT CASES (PLOT PSI)
+            fig, axs = plt.subplots(1, 1, figsize=(6,5))
+            subplotfield(self,axs,self.PSI[:,0])
+            axs.set_title('Poloidal magnetic flux PSI')
+            axs.set_title("Iteration n = "+str(self.it)+ psi_sol)
+            plt.show(block=False)
+            plt.pause(0.8)
+            
         return
-    
     
     def InspectElement(self,element_index,PSI,INTERFACE,QUADRATURE):
         

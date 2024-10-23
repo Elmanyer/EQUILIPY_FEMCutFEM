@@ -90,7 +90,7 @@ $$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
 END_PHYSICAL_PROBLEM                                                                  
 $------------------------------------------------------------                         
 NUMERICAL_TREATMENT    
-  QUADRATURE_ORDER:  3         $ ORDER OF NUMERICAL INTEGRATION QUADRATURES                    
+  QUADRATURE_ORDER:  2         $ ORDER OF NUMERICAL INTEGRATION QUADRATURES                    
   EXT_ITER:          10        $ EXTERNAL LOOP (PHI_B) MAXIMUM ITERATIONS
   EXT_TOL:           1.0e-4    $ EXTERNAL LOOP (PHI_B) CONVERGENCE TOLERANCE
   INT_ITER:          10        $ INTERNAL LOOP (PHI_NORM) MAXIMUM ITERATIONS

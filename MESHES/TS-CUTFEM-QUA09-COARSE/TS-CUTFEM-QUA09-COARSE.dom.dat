@@ -3,7 +3,7 @@ DIMENSIONS
   NODAL_POINTS=         1581
   ELEMENTS=              375
   SPACE_DIMENSIONS=        2
-  TYPES_OF_ELEMENTS=       0,      0,      0,      0,     14
+  TYPES_OF_ELEMENTS=      14
   BOUNDARIES=             80
 END_DIMENSIONS
 $------------------------------------------------------------
