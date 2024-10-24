@@ -22,3 +22,12 @@ Inside the **TESTs** folder, the user may find the test-suites *TS-* files, both
 
 To launch other simulations, the user may use testing files *MainTestEquilipyFIXED.ipynb* and *MainTestEquilipyFREE.ipynb*, where all available meshes have been included. For fixed-boundary problem simulations, meshes can be adjusted to the fixed plasma cross-section (*-REDUCED* meshes); on the other hand, for free-boundary problem simulations larger meshes should be used, preparing for plasma cross-ection deformations. 
 
+## *INPUT FILE*
+
+Input file *.equ.dat* contains the simulation parameters, defining the problem case, the different parametrised geometries and the numerical treatment.
+
+- PHYSICAL PROBLEM:
+    - PROBLEM CASE PARAMETERS: 
+
+- NUMERICAL TREATMENT:
+
