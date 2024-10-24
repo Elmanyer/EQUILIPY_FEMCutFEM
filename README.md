@@ -24,10 +24,14 @@ To launch other simulations, the user may use testing files *MainTestEquilipyFIX
 
 ## *INPUT FILE*
 
-Input file *.equ.dat* contains the simulation parameters, defining the problem case, the different parametrised geometries and the numerical treatment.
+Input file *.equ.dat* contains the simulation parameters, defining the problem case, the different parametrised geometries and the numerical treatment. The parameters are organised according to the following blocks:
 
 - PHYSICAL PROBLEM:
-    - PROBLEM CASE PARAMETERS: 
+    - PROBLEM CASE PARAMETERS: parameters controlling the simulation problem case (*PLASB*, *PLASG*, *PLASC*, *VACVE*).
+    - VACUUM VESSEL GEOMETRY: dimensionless parameters characterising the tokamak's vacuum vessel cross-section.
+    - PLASMA REGION GEOMETRY: initial/free plasma cross-section parameters for the parametrised case (*PLASG* = PARAM).   
+    - PARAMETERS FOR PRESSURE AND TOROIDAL FUNCTION PROFILES: *PROFILES* plasma current model parameters.
+    - PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS: tokamak's external magnets positions and currents. 
 
-- NUMERICAL TREATMENT:
+- NUMERICAL TREATMENT: parameters involved in the numerical scheme (tolerances, maximum iterations...) and numerical processes (initial guess, tolerances...).
 
