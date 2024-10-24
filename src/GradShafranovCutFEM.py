@@ -383,7 +383,7 @@ class GradShafranovCutFEM:
                     self.PLASMA_CURRENT = self.LINEAR_CURRENT
                 elif line[1] == 'NONLI':
                     self.PLASMA_CURRENT = self.NONLINEAR_CURRENT
-                elif line[1] == self.ZHENG_CURRENT:
+                elif line[1] == 'ZHENG':
                     self.PLASMA_CURRENT = self.ZHENG_CURRENT
                 elif line[1] == 'PROFI':
                     self.PLASMA_CURRENT = self.PROFILES_CURRENT
