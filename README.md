@@ -16,15 +16,23 @@ The input files *.equ.dat* and meshes available in the repository have been desi
 
 ## *EXECUTION:*
 
-After clonning the repository, the code is ready is run. 
+After clonning the repository with 
 
-Inside the **TESTs** folder, the user may find the test-suites *TS-* files, both in *.py* and *.ipynb*, ready to execute. The mesh used for the simulation may be changed by commenting and uncommenting the adequate lines. These test-suites represent the simulations corresponding to the *FIXED*-boundary analytical cases, for the *LINEAR*, *NONLINEAR* and *ZHENG* plasma current models, and the *FREE*-boundary problem with *PROFILES* plasma current model.
+    $ git clone https://github.com/Elmanyer/EQUILI_PY.git
+    
+the code is ready is run. 
+
+Inside the **TESTs** folder, the user may find the test-suites *TS-* files, both in *.py* and *.ipynb*, ready to execute. For python files *.py* simply execute 
+
+    $ python TS-CASE.py
+
+The mesh used for the simulation may be changed by commenting and uncommenting the adequate lines. These test-suites represent the simulations corresponding to the *FIXED*-boundary analytical cases, for the *LINEAR*, *NONLINEAR* and *ZHENG* plasma current models, and the *FREE*-boundary problem with *PROFILES* plasma current model.
 
 To launch other simulations, the user may use testing files *MainTestEquilipyFIXED.ipynb* and *MainTestEquilipyFREE.ipynb*, where all available meshes have been included. For fixed-boundary problem simulations, meshes can be adjusted to the fixed plasma cross-section (*-REDUCED* meshes); on the other hand, for free-boundary problem simulations larger meshes should be used, preparing for plasma cross-ection deformations. 
 
 ## *INPUT FILE*
 
-Input file *.equ.dat* contains the simulation parameters, defining the problem case, the different parametrised geometries and the numerical treatment. The parameters are organised according to the following blocks:
+Input files *.equ.dat* in folder **CASES** contain the simulation parameters for different configurations, defining the problem case, the different parametrised geometries and the numerical treatment. The parameters are organised according to the following blocks:
 
 - **PHYSICAL PROBLEM:**
     - **PROBLEM CASE PARAMETERS:** parameters controlling the simulation problem case (*PLASB*, *PLASG*, *PLASC*, *VACVE*).
