@@ -491,7 +491,7 @@ class Element:
             if self.Nsub == 2:
                 # MODIFIED CONECTIVITIES, ACCOUNTING FOR 2 SUBQUADRILATERALS
                 TeTESS = np.array([[4,0,1,5],
-                                    [4,3,3,5]])
+                                    [4,3,2,5]])
                 
             elif self.Nsub == 4:
                 # MODIFIED CONECTIVITIES, ACCOUNTING FOR 4 SUBTRIANGLES
@@ -500,7 +500,6 @@ class Element:
                 # LOOK FOR COMMON NODE
                 edgenodes = np.zeros([2,2],dtype=int)
                 edgenode = np.zeros([2],dtype=int)
-                distance = np.zeros([2])
                 for i in range(2):
                     edgenodes[i,:] = self.CheckNodeOnEdge(XIeint[i,:],self.numvertices,XIe,1e-4)
                 commonnode = (set(edgenodes[0,:])&set(edgenodes[1,:])).pop()
@@ -843,3 +842,113 @@ def ElementalNumberOfNodes(elemType, elemOrder):
     nedge = elemOrder + 1
     return n, nedge
     
+    
+def ReferenceElementCoordinates(elemType,elemOrder):
+    match elemType:
+        case 0:    # LINE (1D ELEMENT)
+            match elemOrder:
+                case 0:
+                    # --1--
+                    Xe = np.array([0])
+                case 1:
+                    # 1---2
+                    Xe = np.array([-1,1])      
+                case 2:         
+                    # 1---3---2
+                    Xe = np.array([-1,1,0])
+                case 3:         
+                    # 1-3-4-2
+                    Xe = np.array([-1,1,-1/3,1/3])
+    
+        case 1:   # TRIANGLE
+            match elemOrder:
+                case 1:
+                    # 2
+                    # |\
+                    # | \
+                    # 3--1
+                    Xe = np.array([[1,0],
+                                   [0,1],
+                                   [0,0]])
+                case 2:
+                    # 2
+                    # |\
+                    # 5 4
+                    # |  \
+                    # 3-6-1
+                    Xe = np.array([[1,0],
+                                   [0,1],
+                                   [0,0],
+                                   [1/2,1/2],
+                                   [0,1/2],
+                                   [1/2,0]])
+                case 3:
+                    #  2
+                    # | \
+                    # 6  5 
+                    # |   \
+                    # 7 10 4
+                    # |     \
+                    # 3-8--9-1
+                    Xe = np.array([[1,0],
+                                   [0,1],
+                                   [0,0],
+                                   [2/3,1/3],
+                                   [1/3,2/3],
+                                   [0,2/3],
+                                   [0,1/3],
+                                   [1/3,0],
+                                   [2/3,0],
+                                   [1/3,1/3]])
+                            
+        case 2:    # QUADRILATERAL
+            match elemOrder:
+                case 1: 
+                    # 4-----3
+                    # |     |
+                    # |     |
+                    # 1-----2
+                    Xe = np.array([[-1,-1],
+                                   [1,-1],
+                                   [1,1],
+                                   [-1,1]])
+                case 2:
+                    # 4---7---3
+                    # |       |
+                    # 8   9   6
+                    # |       |
+                    # 1---5---2
+                    Xe = np.array([[-1,-1],
+                                   [1,-1],
+                                   [1,1],
+                                   [-1,1],
+                                   [0,-1],
+                                   [1,0],
+                                   [0,1],
+                                   [-1,0],
+                                   [0,0]])
+                case 3:
+                    # 4---10--9---3
+                    # |           |
+                    # 11  16  15  8
+                    # |           |
+                    # 12  13  14  7
+                    # |           |
+                    # 1---5---6---2
+                    Xe = np.array([[-1,-1],
+                                   [1,-1],
+                                   [1,1],
+                                   [-1,1],
+                                   [-1/3,-1],
+                                   [1/3,-1],
+                                   [1,-1/3],
+                                   [1,1/3],
+                                   [1/3,1],
+                                   [-1/3,1],
+                                   [-1,1/3],
+                                   [-1,-1/3],
+                                   [-1/3,-1/3],
+                                   [1/3,-1/3],
+                                   [1/3,1/3],
+                                   [-1/3,1/3]])
+    return Xe

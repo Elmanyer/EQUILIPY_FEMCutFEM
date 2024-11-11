@@ -1272,8 +1272,14 @@ class GradShafranovCutFEM:
             elem = self.SearchElement(self.Xcrit[1,0,:-1],self.PlasmaElems)
             self.Xcrit[1,0,-1] = elem
         else:
-            print("LOCAL EXTREMUM NOT FOUND. TAKING PREVIOUS SOLUTION")
-            self.Xcrit[1,0,:] = self.Xcrit[0,0,:]
+            if self.it == 1:
+                print("LOCAL EXTREMUM NOT FOUND. TAKING SOLUTION AT INITIAL GUESS")
+                elem = self.SearchElement(X0_extr,self.PlasmaElems)
+                self.Xcrit[1,0,:-1] = X0_extr
+                self.Xcrit[1,0,-1] = elem
+            else:
+                print("LOCAL EXTREMUM NOT FOUND. TAKING PREVIOUS SOLUTION")
+                self.Xcrit[1,0,:] = self.Xcrit[0,0,:]
             
         # INTERPOLATE PSI VALUE ON CRITICAL POINT
         self.PSI_0 = self.Elements[int(self.Xcrit[1,0,-1])].ElementalInterpolation(self.Xcrit[1,0,:-1],PSI[self.Elements[int(self.Xcrit[1,0,-1])].Te]) 
@@ -1795,7 +1801,7 @@ class GradShafranovCutFEM:
                         containsboundary = False
                         for point in path.vertices:
                             # CHECK IF CONTOUR CONTAINS SADDLE POINT (ONE OF ITS POINTS IS CLOSE ENOUGH)
-                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.1:
+                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3:
                                 containsboundary = True
                         if containsboundary:
                             paths.append(path)
@@ -1805,7 +1811,7 @@ class GradShafranovCutFEM:
                         containscompudombound = False
                         for point in path.vertices:
                             # CHECK IF CONTOUR CONTAINS COMPUTATIONAL DOMAIN BOUNDARY POINTS
-                            if np.abs(point[0]-self.Xmax) < 0.1 or np.abs(point[0]-self.Xmin) < 0.1 or np.abs(point[1]-self.Ymax) < 0.1 or np.abs(point[1]-self.Ymin) < 0.1:
+                            if np.abs(point[0]-self.Xmax) < 0.2 or np.abs(point[0]-self.Xmin) < 0.2 or np.abs(point[1]-self.Ymax) < 0.1 or np.abs(point[1]-self.Ymin) < 0.1:
                                 containscompudombound = True
                         if containscompudombound:
                             paths.remove(path)
@@ -1823,7 +1829,7 @@ class GradShafranovCutFEM:
                     counter = 0
                     for path in paths:
                         for point in path.vertices:
-                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.1 and firstpass:
+                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and firstpass:
                                 oncontour = True 
                                 firstpass = False
                                 plasmaboundary.append(point)
@@ -1832,7 +1838,7 @@ class GradShafranovCutFEM:
                                 counter += 1
                             if counter > 10:
                                 secondpass = True
-                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.1 and secondpass: 
+                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and secondpass: 
                                 oncontour = False 
                                     
                     plasmaboundary.append(plasmaboundary[0])

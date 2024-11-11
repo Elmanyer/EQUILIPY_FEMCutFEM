@@ -257,6 +257,89 @@ def ShapeFunctionsReference(X, elemType, elemOrder, node):
                             N = (1-xi**2)*(1-eta**2)
                             dNdxi = -2*xi*(1-eta**2)
                             dNdeta = (1-xi**2)*(-2*eta)
+                case 3:
+                    # 4---10--9---3
+                    # |           |
+                    # 11  16  15  8
+                    # |           |
+                    # 12  13  14  7
+                    # |           |
+                    # 1---5---6---2
+                    a = 81./256.
+                    c = 1./3.
+                    s1 = 1. + xi
+                    s2 = c + xi
+                    s3 = c - xi
+                    s4 = 1. - xi
+                    t1 = 1. + eta
+                    t2 = c + eta
+                    t3 = c - eta
+                    t4 = 1. - eta
+                    match node:
+                        case 1:
+                            N = a*s2*s3*s4*t2*t3*t4
+                            dNdxi = a*t2*t3*t4*(-s2*s3-s2*s4+s3*s4)
+                            dNdeta = a*s2*s3*s4*(-t2*t3-t2*t4+t3*t4)
+                        case 2:
+                            N = a*s1*s2*s3*t2*t3*t4
+                            dNdxi = a*t2*t3*t4*(-s1*s2+s1*s3+s2*s3)
+                            dNdeta = a*s1*s2*s3*(-t2*t3-t2*t4+t3*t4)
+                        case 3:
+                            N = a*s1*s2*s3*t1*t2*t3
+                            dNdxi = a*t1*t2*t3*(-s1*s2+s1*s3+s2*s3)
+                            dNdeta = a*s1*s2*s3*(-t1*t2+t1*t3+t2*t3)
+                        case 4:
+                            N = a*s2*s3*s4*t1*t2*t3
+                            dNdxi = a*t1*t2*t3*(-s2*s3-s2*s4+s3*s4)
+                            dNdeta = a*s2*s3*s4*(-t1*t2+t1*t3+t2*t3)
+                        case 5:
+                            N = -3.0*a*s1*s3*s4*t2*t3*t4 
+                            dNdxi = -3.0*a*t2*t3*t4*(-s1*s3-s1*s4+s3*s4)
+                            dNdeta = -3.0*a *s1*s3*s4*(-t2*t3-t2*t4+t3*t4)
+                        case 6:
+                            N = -3.0*a*s1*s2*s4*t2*t3*t4
+                            dNdxi = -3.0*a*t2*t3*t4*(-s1*s2+s1*s4+s2*s4)
+                            dNdeta = -3.0*a *s1*s2*s4*(-t2*t3-t2*t4+t3*t4)
+                        case 7:
+                            N = -3.0*a*s1*s2*s3*t1*t3*t4
+                            dNdxi = -3.0*a*t1*t3*t4*(-s1*s2+s1*s3+s2*s3)
+                            dNdeta = -3.0*a *s1*s2*s3*(-t1*t3-t1*t4+t3*t4)
+                        case 8:
+                            N = -3.0*a*s1*s2*s3*t1*t2*t4
+                            dNdxi = -3.0*a*t1*t2*t4*(-s1*s2+s1*s3+s2*s3)
+                            dNdeta = -3.0*a *s1*s2*s3*(-t1*t2+t1*t4+t2*t4)
+                        case 9:
+                            N = -3.0*a*s1*s2*s4*t1*t2*t3  
+                            dNdxi = -3.0*a*t1*t2*t3*(-s1*s2+s1*s4+s2*s4)
+                            dNdeta = -3.0*a *s1*s2*s4*(-t1*t2+t1*t3+t2*t3)
+                        case 10:
+                            N = -3.0*a*s1*s3*s4*t1*t2*t3 
+                            dNdxi = -3.0*a*t1*t2*t3*(-s1*s3-s1*s4+s3*s4)
+                            dNdeta = -3.0*a *s1*s3*s4*(-t1*t2+t1*t3+t2*t3)
+                        case 11:
+                            N = -3.0*a*s2*s3*s4*t1*t2*t4
+                            dNdxi = -3.0*a*t1*t2*t4*(-s2*s3-s2*s4+s3*s4)
+                            dNdeta = -3.0*a *s2*s3*s4*(-t1*t2+t1*t4+t2*t4)
+                        case 12:
+                            N = -3.0*a*s2*s3*s4*t1*t3*t4
+                            dNdxi = -3.0*a*t1*t3*t4*(-s2*s3-s2*s4+s3*s4)
+                            dNdeta = -3.0*a *s2*s3*s4*(-t1*t3-t1*t4+t3*t4)
+                        case 13:
+                            N = 9.0*a*s1*s3*s4*t1*t3*t4
+                            dNdxi = 9.0*a*t1*t3*t4*(-s1*s3-s1*s4+s3*s4)
+                            dNdeta = 9.0*a *s1*s3*s4*(-t1*t3-t1*t4+t3*t4)
+                        case 14:
+                            N = 9.0*a*s1*s2*s4*t1*t3*t4
+                            dNdxi = 9.0*a*t1*t3*t4*(-s1*s2+s1*s4+s2*s4)
+                            dNdeta = 9.0*a *s1*s2*s4*(-t1*t3-t1*t4+t3*t4)
+                        case 15:
+                            N = 9.0*a*s1*s2*s4*t1*t2*t4
+                            dNdxi = 9.0*a*t1*t2*t4*(-s1*s2+s1*s4+s2*s4)
+                            dNdeta = 9.0*a *s1*s2*s4*(-t1*t2+t1*t4+t2*t4)
+                        case 16:
+                            N = 9.0*a*s1*s3*s4*t1*t2*t4
+                            dNdxi = 9.0*a*t1*t2*t4*(-s1*s3-s1*s4+s3*s4)
+                            dNdeta = 9.0*a *s1*s3*s4*(-t1*t2+t1*t4+t2*t4)
     return N, dNdxi, dNdeta
 
 def EvaluateReferenceShapeFunctions(X, elemType, elemOrder, n):
