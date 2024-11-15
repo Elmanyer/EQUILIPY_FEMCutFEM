@@ -342,7 +342,7 @@ def ShapeFunctionsReference(X, elemType, elemOrder, node):
                             dNdeta = 9.0*a *s1*s3*s4*(-t1*t2+t1*t4+t2*t4)
     return N, dNdxi, dNdeta
 
-def EvaluateReferenceShapeFunctions(X, elemType, elemOrder, n):
+def EvaluateReferenceShapeFunctions(X, elemType, elemOrder):
     """ Function that evaluates the shape functions in the reference space for the selected element type and order at points defined by coordinates X
     Input: - X: coordinates of points on which to evaluate shape functions
            - elemType: 0=line, 1=tri, 2=quad
@@ -352,7 +352,10 @@ def EvaluateReferenceShapeFunctions(X, elemType, elemOrder, n):
             - dNdxi: shape functions derivatives respect to xi evaluated at points with coordinates X
             - dNdeta: shape functions derivatives respect to eta evaluated at points with coordinates X
     """
-
+    from Element import ElementalNumberOfNodes
+    ## NUMBER OF NODAL SHAPE FUNCTIONS
+    n, foo = ElementalNumberOfNodes(elemType, elemOrder)
+    ## NUMBER OF GAUSS INTEGRATION NODES
     if elemType == 0:
         Ng = len(X)
     else: 
@@ -369,31 +372,28 @@ def EvaluateReferenceShapeFunctions(X, elemType, elemOrder, n):
     return N, dNdxi, dNdeta
     
 
-def Jacobian(x,y,dNdxi,dNdeta):
+def Jacobian(X,dNdxi,dNdeta):
     """ Function that computes the Jacobian of the mapping between physical and natural coordinates 
-        Input: - x: nodal x physical coordinates 
-               - y: nodal y physical coordinates 
+        Input: - X: nodal physical coordinates 
                - dNdxi: shape functions derivatives respect to xi evaluated at Gauss integration nodes
                - dNdeta: shape functions derivatives respect to eta evaluated at Gauss integration nodes
         Output: - invJ: Jacobian inverse
                 - detJ: Jacobian determinant 
             """
-    n = len(x)
     J = np.zeros([2,2])
     # COMPUTE JACOBIAN
-    for i in range(n):
-        J += np.array([[x[i]*dNdxi[i], y[i]*dNdxi[i]] ,
-                       [x[i]*dNdeta[i], y[i]*dNdeta[i]]])
+    for i in range(len(X[:,0])):
+        J += np.array([[X[i,0]*dNdxi[i], X[i,1]*dNdxi[i]] ,
+                       [X[i,0]*dNdeta[i], X[i,1]*dNdeta[i]]])
         # COMPUTE INVERSE MATRIX AND JACOBIAN
     invJ = np.linalg.inv(J)
     detJ = np.linalg.det(J)
-    return J, invJ, detJ
+    return invJ, detJ
 
 
-def Jacobian1D(x,y,dNdxi):
-    n = len(x)
+def Jacobian1D(X,dNdxi):
     J = np.zeros([2])
-    for i in range(n):
-        J += dNdxi[i]*np.array([x[i],y[i]])
+    for i in range(len(X[:,0])):
+        J += dNdxi[i]*X[i,:]
     detJ = np.linalg.norm(J)
     return detJ
