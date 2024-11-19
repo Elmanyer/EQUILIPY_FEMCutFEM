@@ -30,7 +30,7 @@ from src.GaussQuadrature import *
 from src.ShapeFunctions import *
 from scipy import optimize
 from itertools import chain
-from Segment import *
+from src.Segment import *
 
 class Element:
     
@@ -113,12 +113,16 @@ class Element:
         Xi = sol.x
         return Xi
     
-    def ElementalInterpolation(self,X,Fe):
+    def ElementalInterpolationPHYSICAL(self,X,Fe):
+        """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
+        XI = self.InverseMapping(X)
+        return self.ElementalInterpolationREFERENCE(self,XI,Fe)
+    
+    def ElementalInterpolationREFERENCE(self,XI,Fe):
         """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
         F = 0
-        Xi = self.InverseMapping(X)
         for i in range(self.n):
-            N, foo, foo = ShapeFunctionsReference(Xi, self.ElType, self.ElOrder, i+1)
+            N, foo, foo = ShapeFunctionsReference(XI, self.ElType, self.ElOrder, i+1)
             F += N*Fe[i]
         return F
     
@@ -236,7 +240,7 @@ class Element:
             INTERFACE.Xint = Nint@self.Xe
             
             ## ASSOCIATE ELEMENTAL CONNECTIVITY TO INTERFACE SEGMENTS
-            lnods = [0,np.arange(2,self.ElOrder-1),1]
+            lnods = [0,np.arange(2,self.ElOrder+1),1]
             INTERFACE.Tint = list(chain.from_iterable([x] if not isinstance(x, np.ndarray) else x for x in lnods))
         
             #### GENERATE SEGMENT OBJECTS AND STORE INTERFACE DATA
@@ -291,14 +295,12 @@ class Element:
         #### GENERATE INTERFACE OBJECT
         self.InterfApprox = [InterfaceApprox(index = interface[interf],
                                             Nsegments = 1) for interf in range(self.Neint)]
-        
-        #### GENERATE SEGMENT OBJECTS AND STORE INTERFACE DATA
-        INTERFACE.Segments = [Segment(index = iseg,
-                                    ElOrder = self.ElOrder,   
-                                    Xseg = None) for iseg in range(INTERFACE.Nsegments)] 
            
-        #### FIND NODES ON BOUNDARIES AND STORE DATA IN BOTH STRUCTURES 
         for interf, INTERFACE in enumerate(self.InterfApprox):
+            # GENERATE SEGMENT OBJECTS AND STORE INTERFACE DATA
+            INTERFACE.Segments = [Segment(index = iseg,
+                                        ElOrder = self.ElOrder,   
+                                        Xseg = np.zeros([2,self.dim])) for iseg in range(INTERFACE.Nsegments)] 
             # FIND LOCAL INDEXES OF NODES ON EDGE 
             INTERFACE.ElIntNodes = np.zeros([len(Tbound[0,:-1])], dtype=int)
             for i in range(len(Tbound[0,:-1])):
@@ -322,8 +324,7 @@ class Element:
     
     def InterfaceNormal(self):
         """ This function computes the interface normal vector pointing outwards. """
-        # INTERPOLATE LEVEL-SET ON XTEST
-        LStest = 0
+        
         # LEVEL-SET NODAL VALUES
         if self.Dom == 0:  # ELEMENT CONTAINING PLASMA/VACUUM INTERFACE
             LSe = self.PlasmaLSe
@@ -332,25 +333,27 @@ class Element:
         # COMPUTE THE NORMAL VECTOR FOR EACH SEGMENT CONFORMING THE INTERFACE APPROXIMATION
         for INTERFACE in self.InterfApprox:
             for SEGMENT in INTERFACE.Segments:
+                #### PREPARE TEST NORMAL VECTOR IN PHYSICAL SPACE
                 dx = SEGMENT.Xseg[1,0] - SEGMENT.Xseg[0,0]
                 dy = SEGMENT.Xseg[1,1] - SEGMENT.Xseg[0,1]
-                ntest = np.array([-dy, dx])               # test this normal vector
-                ntest = ntest/np.linalg.norm(ntest)       # normalize
-                Xsegmean = np.mean(SEGMENT.Xseg, axis=0)  # mean point on interface
-                Xtest = Xsegmean + 3*ntest                # physical point on which to test the Level-Set 
-                    
-                # INTERPOLATE LEVEL-SET USING WEIGHTS INVERSELY PROPORTIONAL TO DISTANCE
-                for knode in range(self.n):
-                    # COMPUTE INTERPOLATION WEIGHTS
-                    w = 1.0/np.sqrt((Xtest[0] - self.Xe[knode,0])**2 + (Xtest[1] - self.Xe[knode,1])**2)
-                    # INTERPOLATE LEVEL-SET
-                    LStest += w*LSe[knode]
-                    
+                ntest_xy = np.array([-dy, dx]) 
+                ntest_xy = ntest_xy/np.linalg.norm(ntest_xy) 
+                
+                #### PERFORM THE TEST IN REFERENCE SPACE
+                # PREPARE TEST NORMAL VECTOR IN REFERENCE SPACE
+                dxi = SEGMENT.XIseg[1,0] - SEGMENT.XIseg[0,0]
+                deta = SEGMENT.XIseg[1,1] - SEGMENT.XIseg[0,1]
+                ntest_xieta = np.array([-deta, dxi])                     # test this normal vector
+                ntest_xieta = ntest_xieta/np.linalg.norm(ntest_xieta)    # normalize
+                XIsegmean = np.mean(SEGMENT.XIseg, axis=0)               # mean point on interface
+                XItest = XIsegmean + ntest_xieta                         # physical point on which to test the Level-Set 
+                # INTERPOLATE LEVEL-SET IN REFERENCE SPACE
+                LStest = self.ElementalInterpolationREFERENCE(XItest,LSe)
                 # CHECK SIGN OF LEVEL-SET 
                 if LStest > 0:  # TEST POINT OUTSIDE PLASMA REGION
-                    SEGMENT.NormalVec = ntest
+                    SEGMENT.NormalVec = ntest_xy
                 else:   # TEST POINT INSIDE PLASMA REGION --> NEED TO TAKE THE OPPOSITE NORMAL VECTOR
-                    SEGMENT.NormalVec = -1*ntest
+                    SEGMENT.NormalVec = -1*ntest_xy
         return 
     
     def ComputationalDomainBoundaryNormal(self,Xmax,Xmin,Ymax,Ymin):
@@ -609,7 +612,7 @@ class Element:
             for SEGMENT in INTERFACE.Segments:
                 SEGMENT.ng = Ng1D
                 SEGMENT.Wg = Wg1D
-                SEGMENT.detJg = np.zeros([SEGMENT.Ngaussint])
+                SEGMENT.detJg = np.zeros([SEGMENT.ng])
                 # MAP 1D REFERENCE STANDARD GAUSS INTEGRATION NODES ON REFERENCE VACUUM VESSEL FIRST WALL EDGE 
                 SEGMENT.XIg = N1D @ SEGMENT.XIseg
                 # EVALUATE 2D REFERENCE SHAPE FUNCTION ON REFERENCE VACUUM VESSEL FIRST WALL EDGE GAUSS NODES
@@ -662,10 +665,13 @@ class Element:
                                 Te = self.Te,
                                 PlasmaLSe = None, 
                                 VacVessLSe= None) for isubel in range(self.Nesub)]
-        # ASSIGN A REGION FLAG TO EACH SUBELEMENT
-        for SUBELEM in self.SubElements:
+        
+        for isub, SUBELEM in enumerate(self.SubElements):
+            #### ASSIGN REFERENCE SPACE TESSELLATION
+            SUBELEM.XIe = XIeTESSHO[isub]
+            #### ASSIGN A REGION FLAG TO EACH SUBELEMENT
             # INTERPOLATE VALUE OF LEVEL-SET FUNCTION INSIDE SUBELEMENT
-            LSesub = self.ElementalInterpolation(np.mean(SUBELEM.Xe,axis=0),LSe)
+            LSesub = self.ElementalInterpolationREFERENCE(np.mean(SUBELEM.XIe,axis=0),LSe)
             if self.Dom == 0:
                 if LSesub < 0: 
                     SUBELEM.Dom = -1
@@ -679,12 +685,12 @@ class Element:
                     
         # COMPUTE INTEGRATION QUADRATURE FOR EACH SUBELEMENT
         for SUBELEM in self.SubElements:
-            #### STANDARD REFERENCE ELEMENT QUADRATURE (2D)
+            # STANDARD REFERENCE ELEMENT QUADRATURE (2D)
             XIg2Dstand, SUBELEM.Wg, SUBELEM.ng = GaussQuadrature(SUBELEM.ElType,NumQuadOrder)
             # EVALUATE SUBELEMENTAL REFERENCE SHAPE FUNCTIONS 
             N2Dstand, foo, foo = EvaluateReferenceShapeFunctions(XIg2Dstand, SUBELEM.ElType, SUBELEM.ElOrder)
             # MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS  ->> ADAPTED 2D QUADRATURE FOR SUBELEMENTS
-            SUBELEM.XIg = N2Dstand @ SUBELEM.Xe
+            SUBELEM.XIg = N2Dstand @ SUBELEM.XIe
             # EVALUATE ELEMENTAL REFERENCE SHAPE FUNCTIONS ON ADAPTED REFERENCE QUADRATURE
             SUBELEM.Ng, SUBELEM.dNdxig, SUBELEM.dNdetag = EvaluateReferenceShapeFunctions(SUBELEM.XIg, self.ElType, self.ElOrder)
             # MAPP ADAPTED REFERENCE QUADRATURE ON PHYSICAL ELEMENT
@@ -708,12 +714,12 @@ class Element:
                 SEGMENT.Wg = Wg1D
                 SEGMENT.detJg = np.zeros([SEGMENT.ng])
                 # MAP 1D REFERENCE STANDARD GAUSS INTEGRATION NODES ON THE REFERENCE INTERFACE ->> ADAPTED 1D QUADRATURE FOR INTERFACE
-                SEGMENT.XIg = N1D @ self.XIseg
+                SEGMENT.XIg = N1D @ SEGMENT.XIseg
                 # EVALUATE 2D REFERENCE SHAPE FUNCTION ON INTERFACE ADAPTED QUADRATURE
                 SEGMENT.Ng, SEGMENT.dNdxig, SEGMENT.dNdetag = EvaluateReferenceShapeFunctions(SEGMENT.XIg, self.ElType, self.ElOrder)
                 # MAPP REFERENCE INTERFACE ADAPTED QUADRATURE ON PHYSICAL ELEMENT 
                 SEGMENT.Xg = N1D @ SEGMENT.Xseg
-                for ig in range(SEGMENT.Ngaussint):
+                for ig in range(SEGMENT.ng):
                     SEGMENT.detJg[ig] = Jacobian1D(SEGMENT.Xseg,dNdxi1D[ig,:])  
         return 
     

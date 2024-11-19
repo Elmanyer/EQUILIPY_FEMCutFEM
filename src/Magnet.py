@@ -54,15 +54,14 @@ class Solenoid:
         self.detJg = None       # DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL SOLENOID
         return
     
-    def ComputeHOnodes(self,X0,X1):
+    def ComputeHOnodes(self):
         XeHO = np.zeros([self.n,self.dim])
-        XeHO[0,:] = X0
-        XeHO[1,:] = X1 
-        dx = np.abs(X1[1,0]-X0[0,0])/(self.n-1)
-        dy = np.abs(X1[1,1]-X0[0,1])/(self.n-1)
+        XeHO[:2,:] = self.Xe
+        dx = np.abs(self.Xe[1,0]-self.Xe[0,0])/(self.n-1)
+        dy = np.abs(self.Xe[1,1]-self.Xe[0,1])/(self.n-1)
         for iinnernode in range(2,self.n):
-            XeHO[iinnernode,:] = [np.min(X0[0])+(iinnernode-1)*dx,
-                                 np.min(X0[1])+(iinnernode-1)*dy]
+            XeHO[iinnernode,:] = [self.Xe[0,0]+(iinnernode-1)*dx,
+                                 self.Xe[0,1]+(iinnernode-1)*dy]
         self.Xe = XeHO
         return
     
@@ -71,7 +70,7 @@ class Solenoid:
         # COMPUTE 1D NUMERICAL INTEGRATION QUADRATURES TO INTEGRATE ALONG SOLENOIDS
         self.XIg, self.Wg, self.ng = GaussQuadrature(self.ElType,NumQuadOrder)
         # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE 
-        self.Ng, self.dNdxig, foo = EvaluateReferenceShapeFunctions(self.XIg, self.ElType, self.n)
+        self.Ng, self.dNdxig, foo = EvaluateReferenceShapeFunctions(self.XIg, self.ElType, self.ElOrder)
         # MAP THE GAUSS INTEGRATION NODES TO PHYSICAL SPACE
         self.Xg = self.Ng@self.Xe
         # COMPUTE DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL SOLENOID 

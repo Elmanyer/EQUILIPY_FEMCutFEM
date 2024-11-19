@@ -33,8 +33,8 @@ from random import random
 from scipy.interpolate import griddata
 from src.GaussQuadrature import *
 from src.ShapeFunctions import *
-from Element import *
-from Magnet import *
+from src.Element import *
+from src.Magnet import *
 
 class GradShafranovCutFEM:
     
@@ -428,31 +428,30 @@ class GradShafranovCutFEM:
         
         def BlockF4E(self,line):
             # READ PLASMA SHAPE CONTROL POINTS
-            if line[0] == 'CONTROL_POINTS:':    # READ PLASMA REGION X_CENTER 
+            if line[0] == 'CONTROL_POINTS:':    # READ INITIAL PLASMA REGION NUMBER OF CONTROL POINTS
                 self.CONTROL_POINTS = int(line[1])
-            elif line[0] == 'R_SADDLE:':    # READ PLASMA REGION X_CENTER 
+            elif line[0] == 'R_SADDLE:':    # READ INITIAL PLASMA REGION SADDLE POINT R COORDINATE
                 self.R_SADDLE = float(line[1])
-            elif line[0] == 'Z_SADDLE:':    # READ PLASMA REGION Y_CENTER 
+            elif line[0] == 'Z_SADDLE:':    # READ INITIAL PLASMA REGION SADDLE POINT Z COORDINATE
                 self.Z_SADDLE = float(line[1])
-            elif line[0] == 'R_RIGHTMOST:':    # READ PLASMA REGION X_CENTER 
+            elif line[0] == 'R_RIGHTMOST:':    # READ INITIAL PLASMA REGION RIGHT POINT R COORDINATE
                 self.R_RIGHTMOST = float(line[1])
-            elif line[0] == 'Z_RIGHTMOST:':    # READ PLASMA REGION Y_CENTER 
+            elif line[0] == 'Z_RIGHTMOST:':    # READ INITIAL PLASMA REGION RIGHT POINT Z COORDINATE 
                 self.Z_RIGHTMOST = float(line[1])
-            elif line[0] == 'R_LEFTMOST:':    # READ PLASMA REGION X_CENTER 
+            elif line[0] == 'R_LEFTMOST:':    # READ INITIAL PLASMA REGION LEFT POINT R COORDINATE 
                 self.R_LEFTMOST = float(line[1])
-            elif line[0] == 'Z_LEFTMOST:':    # READ PLASMA REGION Y_CENTER 
+            elif line[0] == 'Z_LEFTMOST:':    # READ INITIAL PLASMA REGION LEFT POINT Z COORDINATE 
                 self.Z_LEFTMOST = float(line[1])
-            elif line[0] == 'R_TOPP:':    # READ PLASMA REGION X_CENTER 
+            elif line[0] == 'R_TOPP:':    # READ INITIAL PLASMA REGION TOP POINT R COORDINATE 
                 self.R_TOP = float(line[1])
-            elif line[0] == 'Z_TOPP:':    # READ PLASMA REGION Y_CENTER 
+            elif line[0] == 'Z_TOPP:':    # READ INITIAL PLASMA REGION TOP POINT Z COORDINATE 
                 self.Z_TOP = float(line[1])
             return
         
         def BlockExternalMagnets(self,line,i,j):
-            if line[0] == 'N_COILS:':    # READ PLASMA REGION X_CENTER 
+            if line[0] == 'N_COILS:':    # READ TOTAL NUMBER COILS 
                 self.Ncoils = int(line[1])
                 self.COILS = [Coil(index = icoil, dim=self.dim, X=np.zeros([self.dim]), I=None) for icoil in range(self.Ncoils)] 
-                i = 0 
             elif line[0] == 'Rposi:' and i<self.Ncoils:    # READ i-th COIL X POSITION
                 self.COILS[i].X[0] = float(line[1])
             elif line[0] == 'Zposi:' and i<self.Ncoils:    # READ i-th COIL Y POSITION
@@ -461,23 +460,18 @@ class GradShafranovCutFEM:
                 self.COILS[i].I = float(line[1])
                 i += 1
             # READ SOLENOID PARAMETERS:
-            elif l[0] == 'N_SOLENOIDS:':    # READ PLASMA REGION X_CENTER 
-                self.Nsole = int(l[1])
-                self.SOLENOIDS = [Solenoid(index = isole, dim=self.dim, X=np.zeros([2,self.dim]), I=None) for isole in range(self.Nsole)] 
-                X0 = np.zeros([self.dim])
-                X1 = np.zeros([self.dim])
-                j = 0
-            elif line[0] == 'Rposi:' and j<self.Nsole:    # READ j-th SOLENOID X POSITION
-                X0[0,0] = float(line[1])
-                X1[1,0] = float(line[1])
-            elif line[0] == 'Zlowe:' and j<self.Nsole:     # READ j-th SOLENOID Y POSITION
-                X0[0,1] = float(line[1])
-            elif line[0] == 'Zuppe:' and j<self.Nsole:      # READ j-th SOLENOID Y POSITION
-                X1[1,1] = float(line[1])
-                self.SOLENOIDS[j].ComputeHOnodes(X0,X1)
-                X0 = np.zeros([self.dim])
-                X1 = np.zeros([self.dim])
-            elif line[0] == 'Inten:' and j<self.Nsole:    # READ j-th SOLENOID INTENSITY
+            elif line[0] == 'N_SOLENOIDS:':    # READ TOTAL NUMBER OF SOLENOIDS
+                self.Nsolenoids = int(line[1])
+                self.SOLENOIDS = [Solenoid(index = isole, ElOrder=self.ElOrder, dim=self.dim, Xe=np.zeros([2,self.dim]), I=None) for isole in range(self.Nsolenoids)] 
+            elif line[0] == 'Rposi:' and j<self.Nsolenoids:    # READ j-th SOLENOID X POSITION
+                self.SOLENOIDS[j].Xe[0,0] = float(line[1])
+                self.SOLENOIDS[j].Xe[1,0] = float(line[1])
+            elif line[0] == 'Zlowe:' and j<self.Nsolenoids:     # READ j-th SOLENOID Y POSITION
+                self.SOLENOIDS[j].Xe[0,1] = float(line[1])
+            elif line[0] == 'Zuppe:' and j<self.Nsolenoids:      # READ j-th SOLENOID Y POSITION
+                self.SOLENOIDS[j].Xe[1,1] = float(line[1])
+                self.SOLENOIDS[j].ComputeHOnodes()
+            elif line[0] == 'Inten:' and j<self.Nsolenoids:    # READ j-th SOLENOID INTENSITY
                 self.SOLENOIDS[j].I = float(line[1])
                 j += 1
             return i, j
@@ -608,6 +602,7 @@ class GradShafranovCutFEM:
         # CONVERT BOUNDARY NODES SET INTO ARRAY
         self.BoundaryNodesSets[0] = np.array(sorted(self.BoundaryNodesSets[0]))
         self.BoundaryNodesSets[1] = np.array(sorted(self.BoundaryNodesSets[1]))
+        print('Done!')
         return
     
     
@@ -989,7 +984,7 @@ class GradShafranovCutFEM:
                                 # LOOP OVER GAUSS NODES
                                 for ig in range(SOLENOID.ng):
                                     for l in range(SOLENOID.n):
-                                        PSI_B[k] += self.mu0 * GreenFunction(Xnode,SOLENOID.Xg) * Jsole * SOLENOID.Ng[ig,l] * SOLENOID.detJg[ig] * SOLENOID.Wg[ig]
+                                        PSI_B[k] += self.mu0 * GreenFunction(Xnode,SOLENOID.Xg[ig,:]) * Jsole * SOLENOID.Ng[ig,l] * SOLENOID.detJg[ig] * SOLENOID.Wg[ig]
                                         
                             # CONTRIBUTION FROM PLASMA CURRENT  ->>  INTEGRATE OVER PLASMA REGION
                             #   1. INTEGRATE IN PLASMA ELEMENTS
@@ -1274,7 +1269,7 @@ class GradShafranovCutFEM:
                 self.Xcrit[1,0,:] = self.Xcrit[0,0,:]
             
         # INTERPOLATE PSI VALUE ON CRITICAL POINT
-        self.PSI_0 = self.Elements[int(self.Xcrit[1,0,-1])].ElementalInterpolation(self.Xcrit[1,0,:-1],PSI[self.Elements[int(self.Xcrit[1,0,-1])].Te]) 
+        self.PSI_0 = self.Elements[int(self.Xcrit[1,0,-1])].ElementalInterpolationPHYSICAL(self.Xcrit[1,0,:-1],PSI[self.Elements[int(self.Xcrit[1,0,-1])].Te]) 
         print('LOCAL EXTREMUM AT ',self.Xcrit[1,0,:-1],' (ELEMENT ', int(self.Xcrit[1,0,-1]),') WITH VALUE PSI_0 = ',self.PSI_0)
             
         if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
@@ -1295,7 +1290,7 @@ class GradShafranovCutFEM:
                 self.Xcrit[1,1,:] = self.Xcrit[0,1,:]
                 
             # INTERPOLATE PSI VALUE ON CRITICAL POINT
-            self.PSI_X = self.Elements[int(self.Xcrit[1,1,-1])].ElementalInterpolation(self.Xcrit[1,1,:-1],PSI[self.Elements[int(self.Xcrit[1,1,-1])].Te]) 
+            self.PSI_X = self.Elements[int(self.Xcrit[1,1,-1])].ElementalInterpolationPHYSICAL(self.Xcrit[1,1,:-1],PSI[self.Elements[int(self.Xcrit[1,1,-1])].Te]) 
             print('SADDLE POINT AT ',self.Xcrit[1,1,:-1],' (ELEMENT ', int(self.Xcrit[1,1,-1]),') WITH VALUE PSI_X = ',self.PSI_X)
         
         else:
@@ -1434,7 +1429,7 @@ class GradShafranovCutFEM:
                 for ielem in self.VacVessWallElems:
                     # FOR EACH FIRST WALL EDGE
                     for INTERFACE in self.Elements[ielem].InterfApprox:
-                        for SEGMENT in INTERFACE:
+                        for SEGMENT in INTERFACE.Segments:
                             # FOR EACH INTEGRATION POINT ON THE FIRST WALL EDGE
                             SEGMENT.PSIgseg = np.zeros([SEGMENT.ng])
                             for inode in range(SEGMENT.ng):
@@ -1581,7 +1576,7 @@ class GradShafranovCutFEM:
         # NODES ON VACUUM VESSEL FIRST WALL GEOMETRY FOR WHICH TO EVALUATE PSI_B VALUES == GAUSS INTEGRATION NODES ON FIRST WALL EDGES
         self.NnFW = 0
         for ielem in self.VacVessWallElems:
-            for INTERFACE in self.Elements[ielem].InterApprox:
+            for INTERFACE in self.Elements[ielem].InterfApprox:
                 for SEGMENT in INTERFACE.Segments:
                     self.NnFW += SEGMENT.ng
                     
@@ -1590,7 +1585,7 @@ class GradShafranovCutFEM:
         # FOR VACUUM VESSEL FIRST WALL ELEMENTS, INITIALISE ELEMENTAL ATTRIBUTE PSI_Bg (PSI VALUES ON VACUUM VESSEL FIRST WALL INTERFACE EDGES GAUSS INTEGRATION POINTS)
         for ielem in self.VacVessWallElems:
             for INTERFACE in self.Elements[ielem].InterfApprox:
-                for SEGMENT in INTERFACE:
+                for SEGMENT in INTERFACE.Segments:
                     SEGMENT.PSIgseg = np.zeros([SEGMENT.ng])   
             
         # COMPUTE INITIAL VACUUM VESSEL FIRST WALL VALUES PSI_B 
@@ -1682,20 +1677,19 @@ class GradShafranovCutFEM:
         self.CheckInterfaceNormalVectors("PLASMA BOUNDARY")
         return
     
-    def CheckInterfaceNormalVectors(self,INTERFACE):
-        if INTERFACE == "PLASMA BOUNDARY":
+    def CheckInterfaceNormalVectors(self,BOUNDARY):
+        if BOUNDARY == "PLASMA BOUNDARY":
             elements = self.PlasmaBoundElems
-        elif INTERFACE == "FIRST WALL":
+        elif BOUNDARY == "FIRST WALL":
             elements = self.VacVessWallElems
             
         for elem in elements:
-            for edge in range(self.Elements[elem].Neint):
-                # ISOLATE INTERFACE SEGMENT/EDGE
-                EDGE = self.Elements[elem].InterfApprox[edge]
-                dir = np.array([EDGE.Xint[1,0]-EDGE.Xint[0,0], EDGE.Xint[1,1]-EDGE.Xint[0,1]]) 
-                scalarprod = np.dot(dir,EDGE.NormalVec)
-                if scalarprod > 1e-10: 
-                    raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
+            for INTERFACE in self.Elements[elem].InterfApprox:
+                for SEGMENT in INTERFACE.Segments:
+                    dir = np.array([SEGMENT.Xseg[1,0]-SEGMENT.Xseg[0,0], SEGMENT.Xseg[1,1]-SEGMENT.Xseg[0,1]]) 
+                    scalarprod = np.dot(dir,SEGMENT.NormalVec)
+                    if scalarprod > 1e-10: 
+                        raise Exception('Dot product equals',scalarprod, 'for mesh element', elem, ": Normal vector not perpendicular")
         return
     
     ##################### COMPUTE NUMERICAL INTEGRATION QUADRATURES FOR EACH ELEMENT GROUP 
@@ -1716,9 +1710,10 @@ class GradShafranovCutFEM:
             for elem in self.VacVessWallElems:
                 self.Elements[elem].ComputeComputationalDomainBoundaryQuadrature(self.QuadratureOrder)
                 
-        # COMPUTE QUADRATURES FOR SOLENOIDS
-        for SOLENOID in self.SOLENOIDS:
-            SOLENOID.ComputeIntegrationQuadrature(self.QuadratureOrder)
+        # FOR FREE-BOUNDARY PROBLEM, COMPUTE QUADRATURES FOR SOLENOIDS
+        if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
+            for SOLENOID in self.SOLENOIDS:
+                SOLENOID.ComputeIntegrationQuadrature(self.QuadratureOrder)
                 
         return
     
@@ -2225,20 +2220,22 @@ class GradShafranovCutFEM:
             if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
                 self.PARAMS_file.write('EXTERNAL_COILS_PARAMETERS\n')
                 self.PARAMS_file.write("    N_COILS_equ = {:d}\n".format(self.Ncoils))
-                for icoil in range(self.Ncoils):
-                    self.PARAMS_file.write("    Rposi = {:f}\n".format(self.Xcoils[icoil,0]))
-                    self.PARAMS_file.write("    Zposi = {:f}\n".format(self.Xcoils[icoil,1]))
-                    self.PARAMS_file.write("    Inten = {:f}\n".format(self.Icoils[icoil]))
+                for COIL in self.COILS:
+                    self.PARAMS_file.write("    Rposi = {:f}\n".format(COIL.X[0]))
+                    self.PARAMS_file.write("    Zposi = {:f}\n".format(COIL.X[1]))
+                    self.PARAMS_file.write("    Inten = {:f}\n".format(COIL.I))
                     self.PARAMS_file.write('\n')
                 self.PARAMS_file.write('END_EXTERNAL_COILS_PARAMETERS\n')
                 self.PARAMS_file.write('\n')
                 
                 self.PARAMS_file.write('EXTERNAL_SOLENOIDS_PARAMETERS\n')
                 self.PARAMS_file.write("    N_SOLENOIDS_equ = {:d}\n".format(self.Nsolenoids))
-                for icoil in range(self.Ncoils):
-                    self.PARAMS_file.write("    Rposi = {:f}\n".format(self.Xcoils[icoil,0]))
-                    self.PARAMS_file.write("    Zposi = {:f}\n".format(self.Xcoils[icoil,1]))
-                    self.PARAMS_file.write("    Inten = {:f}\n".format(self.Icoils[icoil]))
+                for SOLENOID in self.SOLENOIDS:
+                    self.PARAMS_file.write("    Rlow = {:f}\n".format(SOLENOID.Xe[0,0]))
+                    self.PARAMS_file.write("    Zlow = {:f}\n".format(SOLENOID.Xe[0,1]))
+                    self.PARAMS_file.write("    Rup = {:f}\n".format(SOLENOID.Xe[1,0]))
+                    self.PARAMS_file.write("    Zup = {:f}\n".format(SOLENOID.Xe[1,1]))
+                    self.PARAMS_file.write("    Inten = {:f}\n".format(SOLENOID.I))
                     self.PARAMS_file.write('\n')
                 self.PARAMS_file.write('END_EXTERNAL_SOLENOIDS_PARAMETERS\n')
                 self.PARAMS_file.write('\n')
@@ -2249,6 +2246,7 @@ class GradShafranovCutFEM:
             self.PARAMS_file.write("    EXT_TOL_equ = {:e}\n".format(self.EXT_TOL))
             self.PARAMS_file.write("    MAX_INT_IT_equ = {:d}\n".format(self.INT_ITER))
             self.PARAMS_file.write("    INT_TOL_equ = {:e}\n".format(self.INT_TOL))
+            self.PARAMS_file.write("    Beta_equ = {:f}\n".format(self.beta))
             self.PARAMS_file.write('END_NUMERICAL_TREATMENT_PARAMETERS\n')
             self.PARAMS_file.write('\n')
             
@@ -2541,7 +2539,7 @@ class GradShafranovCutFEM:
             
         return
     
-    def InspectElement(self,element_index,PSI,INTERFACE,QUADRATURE):
+    def InspectElement(self,element_index,PSI,TESSELLATION,BOUNDARY,NORMALS,QUADRATURE):
         
         ELEM = self.Elements[element_index]
         Xmin = np.min(ELEM.Xe[:,0])-0.1
@@ -2553,16 +2551,7 @@ class GradShafranovCutFEM:
         elif ELEM.ElType == 2:
             numedges = 4
             
-        if ELEM.Dom == -1:
-            color = 'red'
-        elif ELEM.Dom == 0:
-            color = 'gold'
-        elif ELEM.Dom == 1:
-            color = 'grey'
-        elif ELEM.Dom == 2:
-            color = 'cyan'
-        elif ELEM.Dom == 3:
-            color = 'black'
+        color = self.ElementColor(ELEM.Dom)
 
         fig, axs = plt.subplots(1, 2, figsize=(10,6))
         axs[0].set_xlim(self.Xmin-0.25,self.Xmax+0.25)
@@ -2575,16 +2564,37 @@ class GradShafranovCutFEM:
         for iedge in range(numedges):
             axs[0].plot([ELEM.Xe[iedge,0],ELEM.Xe[int((iedge+1)%ELEM.numedges),0]],[ELEM.Xe[iedge,1],ELEM.Xe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=3)
 
+
         axs[1].set_xlim(Xmin,Xmax)
         axs[1].set_ylim(Ymin,Ymax)
-        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
+        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red',linewidths=2)
         # PLOT ELEMENT EDGES
         for iedge in range(ELEM.numedges):
-            axs[1].plot([ELEM.Xe[iedge,0],ELEM.Xe[int((iedge+1)%ELEM.numedges),0]],[ELEM.Xe[iedge,1],ELEM.Xe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=3)
-        axs[1].scatter(ELEM.Xe[:,0],ELEM.Xe[:,1], marker='o', s=70, zorder=5)
-        if INTERFACE:
-            for iedge in range(ELEM.Neint):
-                axs[1].scatter(ELEM.InterfApprox[iedge].Xint[:,0],ELEM.InterfApprox[iedge].Xint[:,1],marker='.',color='red',s=50, zorder=5)
+            axs[1].plot([ELEM.Xe[iedge,0],ELEM.Xe[int((iedge+1)%ELEM.numedges),0]],[ELEM.Xe[iedge,1],ELEM.Xe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=8)
+        for inode in range(ELEM.n):
+            if ELEM.PlasmaLSe[inode] < 0:
+                cl = 'blue'
+            else:
+                cl = 'red'
+            axs[1].scatter(ELEM.Xe[inode,0],ELEM.Xe[inode,1],s=120,color=cl,zorder=5)
+        if TESSELLATION and (ELEM.Dom == 0 or ELEM.Dom == 2):
+            for isub, SUBELEM in enumerate(ELEM.SubElements):
+                # PLOT SUBELEMENT EDGES
+                for i in range(SUBELEM.numedges):
+                    axs[1].plot([SUBELEM.Xe[i,0], SUBELEM.Xe[(i+1)%SUBELEM.numedges,0]], [SUBELEM.Xe[i,1], SUBELEM.Xe[(i+1)%SUBELEM.numedges,1]], color=colorlist[isub], linewidth=3.5)
+                axs[1].scatter(SUBELEM.Xe[:,0],SUBELEM.Xe[:,1], marker='o', s=60, color=colorlist[isub], zorder=5)
+        if BOUNDARY:
+            for INTERFACE in ELEM.InterfApprox:
+                axs[1].scatter(INTERFACE.Xint[:,0],INTERFACE.Xint[:,1],marker='o',color='red',s=100, zorder=5)
+                for SEGMENT in INTERFACE.Segments:
+                    axs[1].scatter(SEGMENT.Xseg[:,0],SEGMENT.Xseg[:,1],marker='o',color='green',s=30, zorder=5)
+        if NORMALS:
+            for INTERFACE in ELEM.InterfApprox:
+                for SEGMENT in INTERFACE.Segments:
+                    # PLOT NORMAL VECTORS
+                    Xsegmean = np.mean(SEGMENT.Xseg, axis=0)
+                    dl = 10
+                    axs[1].arrow(Xsegmean[0],Xsegmean[1],SEGMENT.NormalVec[0]/dl,SEGMENT.NormalVec[1]/dl,width=0.01)
         if QUADRATURE:
             if ELEM.Dom == -1 or ELEM.Dom == 1 or ELEM.Dom == 3:
                 # PLOT QUADRATURE INTEGRATION POINTS
@@ -2593,18 +2603,17 @@ class GradShafranovCutFEM:
                 # PLOT QUADRATURE INTEGRATION POINTS
                 axs[1].scatter(ELEM.Xg[:,0],ELEM.Xg[:,1],marker='x',c='black', zorder=5)
                 # PLOT INTERFACE INTEGRATION POINTS
-                for iedge in range(ELEM.Neint):
-                    axs[1].scatter(ELEM.InterfApprox[iedge].Xgint[:,0],ELEM.InterfApprox[iedge].Xgint[:,1],marker='x',color='grey',s=50, zorder = 5)
+                for INTERFACE in ELEM.InterfApprox:
+                    for SEGMENT in INTERFACE.Segments:
+                        axs[1].scatter(SEGMENT.Xg[:,0],SEGMENT.Xg[:,1],marker='x',color='grey',s=50, zorder = 5)
             else:
-                for SUBELEM in ELEM.SubElements:
-                    # PLOT SUBELEMENT EDGES
-                    for i in range(numedges):
-                        plt.plot([SUBELEM.Xe[i,0], SUBELEM.Xe[(i+1)%SUBELEM.n,0]], [SUBELEM.Xe[i,1], SUBELEM.Xe[(i+1)%SUBELEM.n,1]], color='black', linewidth=1)
+                for isub, SUBELEM in enumerate(ELEM.SubElements):
                     # PLOT QUADRATURE INTEGRATION POINTS
-                    plt.scatter(SUBELEM.Xg[:,0],SUBELEM.Xg[:,1],marker='x',c='grey', zorder=5)
+                    axs[1].scatter(SUBELEM.Xg[:,0],SUBELEM.Xg[:,1],marker='x',c=colorlist[isub], zorder=3)
                 # PLOT INTERFACE INTEGRATION POINTS
-                for iedge in range(ELEM.Neint):
-                    axs[1].scatter(ELEM.InterfApprox[iedge].Xgint[:,0],ELEM.InterfApprox[iedge].Xgint[:,1],marker='x',color='grey',s=50, zorder=5)
+                for INTERFACE in ELEM.InterfApprox:
+                    for SEGMENT in INTERFACE.Segments:
+                        axs[1].scatter(SEGMENT.Xg[:,0],SEGMENT.Xg[:,1],marker='x',color='grey',s=50, zorder=5)
         return
     
     
@@ -2701,15 +2710,15 @@ class GradShafranovCutFEM:
         
     
     def PlotNormalVectors(self):
-        fig, axs = plt.subplots(1, 2, figsize=(14,10))
+        fig, axs = plt.subplots(1, 2, figsize=(10,5))
         
         axs[0].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
         axs[0].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
-        axs[1].set_xlim(5.5,7)
+        axs[1].set_xlim(6,6.4)
         if self.PLASMA_GEOMETRY == self.FIRST_WALL:
             axs[1].set_ylim(2.5,3.5)
         elif self.PLASMA_GEOMETRY == self.F4E_BOUNDARY:
-            axs[1].set_ylim(1.8,3.5)
+            axs[1].set_ylim(2.2,2.6)
 
         for i in range(2):
             # PLOT PLASMA/VACUUM INTERFACE
@@ -2725,15 +2734,14 @@ class GradShafranovCutFEM:
                     for j in range(self.Elements[elem].n):
                         plt.plot([self.Elements[elem].Xe[j,0], self.Elements[elem].Xe[int((j+1)%self.Elements[elem].n),0]], 
                                 [self.Elements[elem].Xe[j,1], self.Elements[elem].Xe[int((j+1)%self.Elements[elem].n),1]], color='k', linewidth=1)
-                for edge in range(self.Elements[elem].Neint):
-                    # ISOLATE EDGE
-                    EDGE = self.Elements[elem].InterfApprox[edge]
-                    # PLOT INTERFACE APPROXIMATIONS
-                    axs[0].plot(EDGE.Xint[:,0],EDGE.Xint[:,1], linestyle='-',color = 'red', linewidth = 2)
-                    axs[1].plot(EDGE.Xint[:,0],EDGE.Xint[:,1], linestyle='-',marker='o',color = 'red', linewidth = 2)
-                    # PLOT NORMAL VECTORS
-                    Xintmean = np.array([np.mean(EDGE.Xint[:,0]),np.mean(EDGE.Xint[:,1])])
-                    axs[i].arrow(Xintmean[0],Xintmean[1],self.Elements[elem].NormalVec[edge,0]/dl,self.Elements[elem].NormalVec[edge,1]/dl,width=0.01)
+                for INTERFACE in self.Elements[elem].InterfApprox:
+                    for SEGMENT in INTERFACE.Segments:
+                        # PLOT INTERFACE APPROXIMATIONS
+                        axs[0].plot(SEGMENT.Xseg[:,0],SEGMENT.Xseg[:,1], linestyle='-',color = 'red', linewidth = 2)
+                        axs[1].plot(SEGMENT.Xseg[:,0],SEGMENT.Xseg[:,1], linestyle='-',marker='o',color = 'red', linewidth = 2)
+                        # PLOT NORMAL VECTORS
+                        Xsegmean = np.mean(SEGMENT.Xseg, axis=0)
+                        axs[i].arrow(Xsegmean[0],Xsegmean[1],SEGMENT.NormalVec[0]/dl,SEGMENT.NormalVec[1]/dl,width=0.01)
                 
         axs[1].set_aspect('equal')
         plt.show()
@@ -2751,11 +2759,12 @@ class GradShafranovCutFEM:
         k = 0
         l = 0
         for elem in self.PlasmaBoundElems:
-            for edge in range(self.Elements[elem].Neint):
-                for point in range(self.Elements[elem].InterfApprox[edge].Ngaussint):
-                    X_Dg[k,:] = self.Elements[elem].InterfApprox[edge].Xgint[point]
-                    PSI_Dg[k] = self.Elements[elem].InterfApprox[edge].PSIgseg[point]
-                    k += 1
+            for INTERFACE in self.Elements[elem].InterfApprox:
+                for SEGMENT in INTERFACE.Segments:
+                    for inode in range(SEGMENT.ng):
+                        X_Dg[k,:] = SEGMENT.Xg[inode,:]
+                        PSI_Dg[k] = SEGMENT.PSIgseg[inode]
+                        k += 1
             for node in range(self.Elements[elem].n):
                 X_D[l,:] = self.Elements[elem].Xe[node,:]
                 PSI_D[l] = self.PSI[self.Elements[elem].Te[node]]
@@ -2769,11 +2778,12 @@ class GradShafranovCutFEM:
         k = 0
         l = 0
         for elem in self.VacVessWallElems:
-            for edge in range(self.Elements[elem].Neint):
-                for point in range(self.Elements[elem].InterfApprox[edge].Ngaussint):
-                    X_Bg[k,:] = self.Elements[elem].InterfApprox[edge].Xgint[point]
-                    PSI_Bg[k] = self.Elements[elem].InterfApprox[edge].PSIgseg[point]
-                    k += 1
+            for INTERFACE in self.Elements[elem].InterfApprox:
+                for SEGMENT in INTERFACE.Segments:
+                    for inode in range(SEGMENT.ng):
+                        X_Bg[k,:] = SEGMENT.Xg[inode,:]
+                        PSI_Bg[k] = SEGMENT.PSIgseg[inode]
+                        k += 1
             for node in range(self.Elements[elem].n):
                 X_B[l,:] = self.Elements[elem].Xe[node,:]
                 PSI_B[l] = self.PSI[self.Elements[elem].Te[node]]
@@ -2819,19 +2829,20 @@ class GradShafranovCutFEM:
         k = 0
         l = 0
         for elem in self.PlasmaBoundElems:
-            for edge in range(self.Elements[elem].Neint):
-                for point in range(self.Elements[elem].InterfApprox[edge].Ngaussint):
-                    X_Dg[k,:] = self.Elements[elem].InterfApprox[edge].Xgint[point]
-                    if self.PLASMA_CURRENT != self.PROFILES_CURRENT:
-                        PSI_Dexact[k] = self.PSIAnalyticalSolution(X_Dg[k,:],self.PLASMA_CURRENT)
-                    else:
-                        PSI_Dexact[k] = self.Elements[elem].InterfApprox[edge].PSIgseg[point]
-                    PSI_Dg[k] = self.Elements[elem].InterfApprox[edge].PSIgseg[point]
-                    k += 1
-            for node in range(self.Elements[elem].n):
-                X_D[l,:] = self.Elements[elem].Xe[node,:]
+            for INTERFACE in range(self.Elements[elem].InterfApprox):
+                for SEGMENT in INTERFACE.Segments:
+                    for inode in range(SEGMENT.ng):
+                        X_Dg[k,:] = SEGMENT.Xg[inode,:]
+                        if self.PLASMA_CURRENT != self.PROFILES_CURRENT:
+                            PSI_Dexact[k] = self.PSIAnalyticalSolution(X_Dg[k,:],self.PLASMA_CURRENT)
+                        else:
+                            PSI_Dexact[k] = SEGMENT.PSIgseg[inode]
+                        PSI_Dg[k] = SEGMENT.PSIgseg[inode]
+                        k += 1
+            for jnode in range(self.Elements[elem].n):
+                X_D[l,:] = self.Elements[elem].Xe[jnode,:]
                 PSI_Dexact_node = self.PSIAnalyticalSolution(X_D[l,:],self.PLASMA_CURRENT)
-                PSI_D[l] = self.PSI[self.Elements[elem].Te[node]]
+                PSI_D[l] = self.PSI[self.Elements[elem].Te[jnode]]
                 error[l] = np.abs(PSI_D[l]-PSI_Dexact_node)
                 l += 1
             
@@ -2922,11 +2933,12 @@ class GradShafranovCutFEM:
                 # PLOT QUADRATURE INTEGRATION POINTS
                 plt.scatter(SUBELEM.Xg[:,0],SUBELEM.Xg[:,1],marker='x',c='gold')
             # PLOT INTERFACE LINEAR APPROXIMATION AND INTEGRATION POINTS
-            for edge in range(ELEMENT.Neint):
-                # PLOT INTERFACE LINEAR APPROXIMATION
-                plt.plot(ELEMENT.InterfApprox[edge].Xint[:,0], ELEMENT.InterfApprox[edge].Xint[:,1], color='green', linewidth=1)
-                # PLOT INTERFACE QUADRATURE
-                plt.scatter(ELEMENT.InterfApprox[edge].Xgint[:,0],ELEMENT.InterfApprox[edge].Xgint[:,1],marker='o',c='green')
+            for INTERFACE in range(ELEMENT.InterfApprox):
+                for SEGMENT in INTERFACE.Segments:
+                    # PLOT INTERFACE LINEAR APPROXIMATION
+                    plt.plot(SEGMENT.Xseg[:,0], SEGMENT.Xseg[:,1], color='green', linewidth=1)
+                    # PLOT INTERFACE QUADRATURE
+                    plt.scatter(SEGMENT.Xg[:,0],SEGMENT.Xg[:,1],marker='o',c='green')
                 
         # PLOT VACUUM VESSEL FIRST WALL ELEMENTS
         for elem in self.VacVessWallElems:
@@ -2945,11 +2957,12 @@ class GradShafranovCutFEM:
                     # PLOT QUADRATURE INTEGRATION POINTS
                     plt.scatter(SUBELEM.Xg[:,0],SUBELEM.Xg[:,1],marker='x',c='darkturquoise')
             # PLOT INTERFACE LINEAR APPROXIMATION AND INTEGRATION POINTS
-            for edge in range(ELEMENT.Neint):
-                # PLOT INTERFACE LINEAR APPROXIMATION
-                plt.plot(ELEMENT.InterfApprox[edge].Xint[:,0], ELEMENT.InterfApprox[edge].Xint[:,1], color='orange', linewidth=1)
-                # PLOT INTERFACE QUADRATURE
-                plt.scatter(ELEMENT.InterfApprox[edge].Xgint[:,0],ELEMENT.InterfApprox[edge].Xgint[:,1],marker='o',c='orange')
+            for INTERFACE in range(ELEMENT.InterfApprox):
+                for SEGMENT in INTERFACE.Segments:
+                    # PLOT INTERFACE LINEAR APPROXIMATION
+                    plt.plot(SEGMENT.Xseg[:,0], SEGMENT.Xseg[:,1], color='orange', linewidth=1)
+                    # PLOT INTERFACE QUADRATURE
+                    plt.scatter(SEGMENT.Xg[:,0],SEGMENT.Xg[:,1],marker='o',c='orange')
 
         plt.show()
         return
@@ -2995,4 +3008,141 @@ class GradShafranovCutFEM:
         
         return
     
+    @staticmethod
+    def ElementColor(dom):
+        if dom == -1:
+            color = 'red'
+        elif dom == 0:
+            color = 'gold'
+        elif dom == 1:
+            color = 'grey'
+        elif dom == 2:
+            color = 'cyan'
+        elif dom == 3:
+            color = 'black'
+        return color
+    
+    def PlotREFERENCE_PHYSICALelement(self,element_index,TESSELLATION,BOUNDARY,NORMALS,QUADRATURE):
+        ELEM = self.Elements[element_index]
+        Xmin = np.min(ELEM.Xe[:,0])-0.1
+        Xmax = np.max(ELEM.Xe[:,0])+0.1
+        Ymin = np.min(ELEM.Xe[:,1])-0.1
+        Ymax = np.max(ELEM.Xe[:,1])+0.1
+        if ELEM.ElType == 1:
+            numedges = 3
+        elif ELEM.ElType == 2:
+            numedges = 4
+            
+        color = self.ElementColor(ELEM.Dom)
+        colorlist = ['#009E73','#D55E00','#CC79A7','#56B4E9']
+
+        fig, axs = plt.subplots(1, 2, figsize=(10,5))
+        XIe = ReferenceElementCoordinates(ELEM.ElType,ELEM.ElOrder)
+        XImin = np.min(XIe[:,0])-0.1
+        XImax = np.max(XIe[:,0])+0.1
+        ETAmin = np.min(XIe[:,1])-0.1
+        ETAmax = np.max(XIe[:,1])+0.1
+        axs[0].set_xlim(XImin,XImax)
+        axs[0].set_ylim(ETAmin,ETAmax)
+        axs[0].tricontour(XIe[:,0],XIe[:,1], ELEM.PlasmaLSe, levels=[0], colors = 'red',linewidths=2)
+        # PLOT ELEMENT EDGES
+        for iedge in range(ELEM.numedges):
+            axs[0].plot([XIe[iedge,0],XIe[int((iedge+1)%ELEM.numedges),0]],[XIe[iedge,1],XIe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=8)
+        for inode in range(ELEM.n):
+            if ELEM.PlasmaLSe[inode] < 0:
+                cl = 'blue'
+            else:
+                cl = 'red'
+            axs[0].scatter(XIe[inode,0],XIe[inode,1],s=120,color=cl,zorder=5)
+
+        if TESSELLATION and (ELEM.Dom == 0 or ELEM.Dom == 2):
+            for isub, SUBELEM in enumerate(ELEM.SubElements):
+                # PLOT SUBELEMENT EDGES
+                for i in range(SUBELEM.numedges):
+                    axs[0].plot([SUBELEM.XIe[i,0], SUBELEM.XIe[(i+1)%SUBELEM.numedges,0]], [SUBELEM.XIe[i,1], SUBELEM.XIe[(i+1)%SUBELEM.numedges,1]], color=colorlist[isub], linewidth=3.5)
+                axs[0].scatter(SUBELEM.XIe[:,0],SUBELEM.XIe[:,1], marker='o', s=60, color=colorlist[isub], zorder=5)
+        if BOUNDARY:
+            for INTERFACE in ELEM.InterfApprox:
+                axs[0].scatter(INTERFACE.XIint[:,0],INTERFACE.XIint[:,1],marker='o',color='red',s=100, zorder=5)
+                for SEGMENT in INTERFACE.Segments:
+                    axs[0].scatter(SEGMENT.XIseg[:,0],SEGMENT.XIseg[:,1],marker='o',color='green',s=30, zorder=5)
+        if NORMALS:
+            for INTERFACE in ELEM.InterfApprox:
+                for SEGMENT in INTERFACE.Segments:
+                    # PLOT NORMAL VECTORS
+                    Xsegmean = np.mean(SEGMENT.Xseg, axis=0)
+                    dl = 10
+                    #axs[0].arrow(Xsegmean[0],Xsegmean[1],SEGMENT.NormalVec[0]/dl,SEGMENT.NormalVec[1]/dl,width=0.01)
+        if QUADRATURE:
+            if ELEM.Dom == -1 or ELEM.Dom == 1 or ELEM.Dom == 3:
+                # PLOT QUADRATURE INTEGRATION POINTS
+                axs[0].scatter(ELEM.XIg[:,0],ELEM.XIg[:,1],marker='x',c='black')
+            elif ELEM.Dom == 2 and self.VACUUM_VESSEL == self.COMPUTATIONAL:
+                # PLOT QUADRATURE INTEGRATION POINTS
+                axs[0].scatter(ELEM.XIg[:,0],ELEM.XIg[:,1],marker='x',c='black', zorder=5)
+                # PLOT INTERFACE INTEGRATION POINTS
+                for INTERFACE in ELEM.InterfApprox:
+                    for SEGMENT in INTERFACE.Segments:
+                        axs[0].scatter(SEGMENT.XIg[:,0],SEGMENT.XIg[:,1],marker='x',color='grey',s=50, zorder = 5)
+            else:
+                for isub, SUBELEM in enumerate(ELEM.SubElements):
+                    # PLOT QUADRATURE INTEGRATION POINTS
+                    axs[0].scatter(SUBELEM.XIg[:,0],SUBELEM.XIg[:,1],marker='x',c=colorlist[isub], zorder=3)
+                # PLOT INTERFACE INTEGRATION POINTS
+                for INTERFACE in ELEM.InterfApprox:
+                    for SEGMENT in INTERFACE.Segments:
+                        axs[0].scatter(SEGMENT.XIg[:,0],SEGMENT.XIg[:,1],marker='x',color='grey',s=50, zorder=5)
+                        
+                        
+        axs[1].set_xlim(Xmin,Xmax)
+        axs[1].set_ylim(Ymin,Ymax)
+        axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red',linewidths=2)
+        # PLOT ELEMENT EDGES
+        for iedge in range(ELEM.numedges):
+            axs[1].plot([ELEM.Xe[iedge,0],ELEM.Xe[int((iedge+1)%ELEM.numedges),0]],[ELEM.Xe[iedge,1],ELEM.Xe[int((iedge+1)%ELEM.numedges),1]], color=color, linewidth=8)
+        for inode in range(ELEM.n):
+            if ELEM.PlasmaLSe[inode] < 0:
+                cl = 'blue'
+            else:
+                cl = 'red'
+            axs[1].scatter(ELEM.Xe[inode,0],ELEM.Xe[inode,1],s=120,color=cl,zorder=5)
+        if TESSELLATION and (ELEM.Dom == 0 or ELEM.Dom == 2):
+            for isub, SUBELEM in enumerate(ELEM.SubElements):
+                # PLOT SUBELEMENT EDGES
+                for i in range(SUBELEM.numedges):
+                    axs[1].plot([SUBELEM.Xe[i,0], SUBELEM.Xe[(i+1)%SUBELEM.numedges,0]], [SUBELEM.Xe[i,1], SUBELEM.Xe[(i+1)%SUBELEM.numedges,1]], color=colorlist[isub], linewidth=3.5)
+                axs[1].scatter(SUBELEM.Xe[:,0],SUBELEM.Xe[:,1], marker='o', s=60, color=colorlist[isub], zorder=5)
+        if BOUNDARY:
+            for INTERFACE in ELEM.InterfApprox:
+                axs[1].scatter(INTERFACE.Xint[:,0],INTERFACE.Xint[:,1],marker='o',color='red',s=100, zorder=5)
+                for SEGMENT in INTERFACE.Segments:
+                    axs[1].scatter(SEGMENT.Xseg[:,0],SEGMENT.Xseg[:,1],marker='o',color='green',s=30, zorder=5)
+        if NORMALS:
+            for INTERFACE in ELEM.InterfApprox:
+                for SEGMENT in INTERFACE.Segments:
+                    # PLOT NORMAL VECTORS
+                    Xsegmean = np.mean(SEGMENT.Xseg, axis=0)
+                    dl = 10
+                    axs[1].arrow(Xsegmean[0],Xsegmean[1],SEGMENT.NormalVec[0]/dl,SEGMENT.NormalVec[1]/dl,width=0.01)
+        if QUADRATURE:
+            if ELEM.Dom == -1 or ELEM.Dom == 1 or ELEM.Dom == 3:
+                # PLOT QUADRATURE INTEGRATION POINTS
+                axs[1].scatter(ELEM.Xg[:,0],ELEM.Xg[:,1],marker='x',c='black')
+            elif ELEM.Dom == 2 and self.VACUUM_VESSEL == self.COMPUTATIONAL:
+                # PLOT QUADRATURE INTEGRATION POINTS
+                axs[1].scatter(ELEM.Xg[:,0],ELEM.Xg[:,1],marker='x',c='black', zorder=5)
+                # PLOT INTERFACE INTEGRATION POINTS
+                for INTERFACE in ELEM.InterfApprox:
+                    for SEGMENT in INTERFACE.Segments:
+                        axs[1].scatter(SEGMENT.Xg[:,0],SEGMENT.Xg[:,1],marker='x',color='grey',s=50, zorder = 5)
+            else:
+                for isub, SUBELEM in enumerate(ELEM.SubElements):
+                    # PLOT QUADRATURE INTEGRATION POINTS
+                    axs[1].scatter(SUBELEM.Xg[:,0],SUBELEM.Xg[:,1],marker='x',c=colorlist[isub], zorder=3)
+                # PLOT INTERFACE INTEGRATION POINTS
+                for INTERFACE in ELEM.InterfApprox:
+                    for SEGMENT in INTERFACE.Segments:
+                        axs[1].scatter(SEGMENT.Xg[:,0],SEGMENT.Xg[:,1],marker='x',color='grey',s=50, zorder=5)
+                
+        return
     
