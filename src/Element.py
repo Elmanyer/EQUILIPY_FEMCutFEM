@@ -116,7 +116,7 @@ class Element:
     def ElementalInterpolationPHYSICAL(self,X,Fe):
         """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
         XI = self.InverseMapping(X)
-        return self.ElementalInterpolationREFERENCE(self,XI,Fe)
+        return self.ElementalInterpolationREFERENCE(XI,Fe)
     
     def ElementalInterpolationREFERENCE(self,XI,Fe):
         """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
@@ -152,10 +152,10 @@ class Element:
             XIintEND = np.zeros([2,2])
             INTERFACE.ElIntNodes = np.zeros([2,2],dtype=int)
             k = 0
-            for i in range(self.nedge):  # Loop over elemental edges
+            for i in range(self.numedges):  # Loop over elemental edges
                 # Check for sign change along the edge
                 inode = i
-                jnode = (i + 1) % self.nedge
+                jnode = (i + 1) % self.numedges
                 if LSe[inode] * LSe[jnode] < 0:
                     INTERFACE.ElIntNodes[k,:] = [inode,jnode]
                     if abs(XIe[jnode,0]-XIe[inode,0]) < 1e-6: # VERTICAL EDGE
@@ -346,7 +346,7 @@ class Element:
                 ntest_xieta = np.array([-deta, dxi])                     # test this normal vector
                 ntest_xieta = ntest_xieta/np.linalg.norm(ntest_xieta)    # normalize
                 XIsegmean = np.mean(SEGMENT.XIseg, axis=0)               # mean point on interface
-                XItest = XIsegmean + ntest_xieta                         # physical point on which to test the Level-Set 
+                XItest = XIsegmean + 0.5*ntest_xieta                     # physical point on which to test the Level-Set 
                 # INTERPOLATE LEVEL-SET IN REFERENCE SPACE
                 LStest = self.ElementalInterpolationREFERENCE(XItest,LSe)
                 # CHECK SIGN OF LEVEL-SET 
@@ -504,7 +504,7 @@ class Element:
             elif self.Dom == 2:  # ELEMENT CONTAINING VACUUM VESSEL FIRST WALL
                 LSe = self.VacVessLSe
             
-            if np.prod(LSe[:self.nedge]) > 0:  # 2 SUBQUADRILATERALS
+            if np.prod(LSe[:self.numedges]) > 0:  # 2 SUBQUADRILATERALS
                 Nesub = 2
                 SubElType = 2
             
