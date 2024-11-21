@@ -45,7 +45,7 @@ class GradShafranovCutFEM:
     def __init__(self,MESH,CASE):
         # WORKING DIRECTORY
         pwd = os.getcwd()
-        self.pwd = pwd[:pwd.rfind("EQUILIPY")+9]
+        self.pwd = pwd[:pwd.rfind("EQUILIPY_FEMCutFEM")+19]
         
         # INPUT FILES:
         self.mesh_folder = self.pwd + '/MESHES/' + MESH
@@ -54,7 +54,7 @@ class GradShafranovCutFEM:
         self.CASE = CASE[CASE.rfind('/')+1:]
         
         # OUTPUT FILES
-        self.outputdir = self.pwd + '/RESULTS/' + self.CASE + '-' + self.MESH
+        self.outputdir = self.pwd + '/../RESULTS_FEMCutFEM/' + self.CASE + '-' + self.MESH
         self.PARAMS_file = None             # OUTPUT FILE CONTAINING THE SIMULATION PARAMETERS 
         self.PSI_file = None                # OUTPUT FILE CONTAINING THE PSI FIELD VALUES OBTAINED BY SOLVING THE CutFEM SYSTEM
         self.PSIcrit_file = None            # OUTPUT FILE CONTAINING THE CRITICAL PSI VALUES
@@ -680,8 +680,8 @@ class GradShafranovCutFEM:
                       [-(coeffs[4]*Rt**4)/8+(coeffs[5]*Zt**2)/2],
                       [-(coeffs[4]*Rt**2)/2]])
         
-        coeffs = np.linalg.solve(A,b)
-        coeffs[:4] = coeffs.T[0].tolist()
+        coeffs_red = np.linalg.solve(A,b)
+        coeffs[:4] = coeffs_red.T[0].tolist()
         return coeffs
     
     def PSIAnalyticalSolution(self,X,MODEL):
