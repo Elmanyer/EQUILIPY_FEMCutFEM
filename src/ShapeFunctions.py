@@ -24,14 +24,19 @@
 import numpy as np
 
 def ShapeFunctionsReference(X, elemType, elemOrder, node):
-    """ Shape functions in reference element, for different type of elements (geometry and order)
-    Input: - X: coordinates of point on which to evaluate shape function (natural coordinates) 
-           - elemType: 0=line, 1=tri, 2=quad
-           - elemOrder: order of element
-           - node: local nodal index 
-    Output: - N: shape function evaluated at Gz
-            - dNdxi: shape function derivative respect to xi evaluated at z
-            - dNdeta: shape function derivative respect to eta evaluated at z
+    """ 
+    Nodal shape function in reference element, for element type and order elemType and elemOrder respectively, evaluated at point X.
+    
+    Input: 
+        - X: coordinates of point on which to evaluate shape function (natural coordinates) 
+        - elemType: 0=line, 1=tri, 2=quad
+        - elemOrder: order of element
+        - node: local nodal index 
+    
+    Output: 
+        - N: nodal shape function evaluated at X
+        - dNdxi: nodal shape function derivative respect to xi evaluated at point X
+        - dNdeta: nodal shape function derivative respect to eta evaluated at point X
     """
 
     N = 0
@@ -343,15 +348,20 @@ def ShapeFunctionsReference(X, elemType, elemOrder, node):
     return N, dNdxi, dNdeta
 
 def EvaluateReferenceShapeFunctions(X, elemType, elemOrder):
-    """ Function that evaluates the shape functions in the reference space for the selected element type and order at points defined by coordinates X
-    Input: - X: coordinates of points on which to evaluate shape functions
-           - elemType: 0=line, 1=tri, 2=quad
-           - elemOrder: order of element
-           - n: number of nodes (shape functions) per element
-    Output: - N: shape functions evaluated at points with coordinates X
-            - dNdxi: shape functions derivatives respect to xi evaluated at points with coordinates X
-            - dNdeta: shape functions derivatives respect to eta evaluated at points with coordinates X
+    """ 
+    Evaluates nodal shape functions in the reference space for the selected element type and order at points defined by coordinates X
+    
+    Input: 
+        - X: coordinates of points on which to evaluate shape functions
+        - elemType: 0=line, 1=tri, 2=quad
+        - elemOrder: order of element
+
+    Output: 
+        - N: shape functions evaluated at points with coordinates X
+        - dNdxi: shape functions derivatives respect to xi evaluated at points with coordinates X
+        - dNdeta: shape functions derivatives respect to eta evaluated at points with coordinates X
     """
+    
     from src.Element import ElementalNumberOfNodes
     ## NUMBER OF NODAL SHAPE FUNCTIONS
     n, foo = ElementalNumberOfNodes(elemType, elemOrder)
@@ -373,13 +383,19 @@ def EvaluateReferenceShapeFunctions(X, elemType, elemOrder):
     
 
 def Jacobian(X,dNdxi,dNdeta):
-    """ Function that computes the Jacobian of the mapping between physical and natural coordinates 
-        Input: - X: nodal physical coordinates 
-               - dNdxi: shape functions derivatives respect to xi evaluated at Gauss integration nodes
-               - dNdeta: shape functions derivatives respect to eta evaluated at Gauss integration nodes
-        Output: - invJ: Jacobian inverse
-                - detJ: Jacobian determinant 
-            """
+    """ 
+    Function that computes the Jacobian of the mapping between physical and natural coordinates 
+        
+    Input: 
+        - X: elemental physical coordinates 
+        - dNdxi: shape functions derivatives respect to xi evaluated at Gauss integration nodes
+        - dNdeta: shape functions derivatives respect to eta evaluated at Gauss integration nodes
+    
+    Output: 
+        - invJ: Jacobian inverse
+        - detJ: Jacobian determinant 
+    """
+    
     J = np.zeros([2,2])
     # COMPUTE JACOBIAN
     for i in range(len(X[:,0])):
@@ -392,6 +408,21 @@ def Jacobian(X,dNdxi,dNdeta):
 
 
 def Jacobian1D(X,dNdxi):
+    """
+    Calculates the Jacobian determinant of the transformation between the 1D reference element and the physical space.
+
+    Input:
+        - X (numpy.ndarray): A 2D array of nodal coordinates in physical space, where each row corresponds to a node's 
+                        physical coordinates.
+                        Shape: (n_nodes, dimension), where `n_nodes` is the number of nodes in the element and 
+                        `dimension` is the spatial dimension.          
+        - dNdxi (numpy.ndarray): A 1D array of shape function derivatives with respect to the reference coordinate (xi).
+                            Length: `n_nodes`, where `n_nodes` is the number of nodes in the element.
+
+    Output:
+        detJ (float): The determinant of the Jacobian matrix, which represents the scale factor when mapping from 
+                    the reference space to the physical space.
+    """
     J = np.zeros([2])
     for i in range(len(X[:,0])):
         J += dNdxi[i]*X[i,:]

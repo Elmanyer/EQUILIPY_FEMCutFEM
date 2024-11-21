@@ -39,6 +39,27 @@ class Element:
     ##################################################################################################
     
     def __init__(self,index,ElType,ElOrder,Xe,Te,PlasmaLSe,VacVessLSe):
+        """ 
+        Initializes an element object with the specified properties, including its type, order, nodal coordinates, 
+        and level-set values for the plasma and vacuum vessel regions. 
+
+        The constructor also calculates the number of nodes and edges based on the element type and order, 
+        and sets up necessary attributes for quadrature integration and interface handling.
+
+        Input:
+            - index (int): Global index of the element in the computational mesh.
+            - ElType (int): Element type identifier:
+                        - 0: Segment (1D element)
+                        - 1: Triangle (2D element)
+                        - 2: Quadrilateral (2D element)
+            - ElOrder (int): Element order:
+                        - 1: Linear element
+                        - 2: Quadratic element
+            - Xe (numpy.ndarray): Elemental nodal coordinates in physical space.
+            - Te (numpy.ndarray): Element connectivity matrix.
+            - PlasmaLSe (numpy.ndarray): Level-set values for the plasma region at each nodal point.
+            - VacVessLSe (numpy.ndarray): Level-set values for the vacuum vessel first wall region at each nodal point.
+        """
         
         self.index = index                                              # GLOBAL INDEX ON COMPUTATIONAL MESH
         self.ElType = ElType                                            # ELEMENT TYPE -> 0: SEGMENT ;  1: TRIANGLE  ; 2: QUADRILATERAL
@@ -77,27 +98,35 @@ class Element:
     
     
     def Mapping(self,Xi):
-        """ This function implements the mapping corresponding to the transformation from natural to physical coordinates. 
+        """ 
+        This function implements the mapping corresponding to the transformation from natural to physical coordinates. 
         That is, given a point in the reference element with coordinates Xi, this function returns the coordinates X of the corresponding point mapped
         in the physical element with nodal coordinates Xe. 
         In order to do that, we solve the nonlinear system implicitly araising from the original isoparametric equations. 
         
-        Input: - Xg: coordinates of point in reference space for which to compute the coordinate in physical space
-               - Xe: nodal coordinates of physical element
-        Output: - X: coodinates of mapped point in reference element """
+        Input: 
+            - Xg: coordinates of point in reference space for which to compute the coordinate in physical space.
+            - Xe: nodal coordinates of physical element.
+        Output: 
+             X: coodinates of mapped point in reference element.
+        """
         
         N, foo, foo = EvaluateReferenceShapeFunctions(Xi, self.ElType, self.ElOrder)
         X = N @ self.Xe
         return X
     
     def InverseMapping(self, X):
-        """ This function implements the inverse mapping corresponding to the transformation from natural to physical coordinates (thus, for the inverse transformation
+        """ 
+        This function implements the inverse mapping corresponding to the transformation from natural to physical coordinates (thus, for the inverse transformation
         we go from physical to natural coordinates). That is, given a point in physical space with coordinates X in the element with nodal coordinates Xe, 
         this function returns the point mapped in the reference element with natural coordinates Xi. 
         In order to do that, we solve the nonlinear system implicitly araising from the original isoparametric equations. 
         
-        Input: - X: physical coordinates of point for which compute the corresponding point in the reference space
-        Output: - Xg: coodinates of mapped point in reference element """
+        Input: 
+            X: physical coordinates of point for which compute the corresponding point in the reference space.
+        Output: 
+            Xg: coodinates of mapped point in reference element.
+        """
         
         # DEFINE THE NONLINEAR SYSTEM 
         def fun(Xi, X, Xe):
@@ -114,12 +143,16 @@ class Element:
         return Xi
     
     def ElementalInterpolationPHYSICAL(self,X,Fe):
-        """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
+        """ 
+        Interpolate field F with nodal values Fe on point X using elemental shape functions. 
+        """
         XI = self.InverseMapping(X)
         return self.ElementalInterpolationREFERENCE(XI,Fe)
     
     def ElementalInterpolationREFERENCE(self,XI,Fe):
-        """ Interpolate field F with nodal values Fe on point X using elemental shape functions. """
+        """ 
+        Interpolate field F with nodal values Fe on point X using elemental shape functions. 
+        """
         F = 0
         for i in range(self.n):
             N, foo, foo = ShapeFunctionsReference(XI, self.ElType, self.ElOrder, i+1)
@@ -132,8 +165,24 @@ class Element:
     ##################################################################################################
     
     def InterfaceApproximation(self,interface_index):
+        """
+        Approximates the interface between plasma and vacuum regions by computing the intersection points 
+        of the plasma/vacuum boundary with the edges and interior of the element.
+
+        The function performs the following steps:
+            1. Reads the level-set nodal values
+            2. Computes the coordinates of the reference element.
+            3. Identifies the intersection points of the interface with the edges of the REFERENCE element.
+            4. Uses interpolation to approximate the interface inside the REFERENCE element, including high-order interior nodes.
+            5. Maps the interface approximation back to PHYSICAL space using shape functions.
+            6. Associates elemental connectivity to interface segments.
+            7. Generates segment objects for each segment of the interface and computes high-order segment nodes.
+
+        Input:
+            interface_index (int): The index of the interface to be approximated.
+        """
         # READ LEVEL-SET NODAL VALUES
-        if self.Dom == 0:  # PLASMA/VACUUM INTERFACE ELEMENT
+        if self.Dom == 0:  # PLASMA BOUNDARY ELEMENT
             LSe = self.PlasmaLSe  
         if self.Dom == 2:  # VACUUM VESSEL FIRST WALL ELEMENT
             LSe = self.VacVessLSe
@@ -273,9 +322,12 @@ class Element:
     
     
     def ComputationalDomainBoundaryEdges(self,Tbound):
-        """ This function finds for each element the edges lying on the computational domain's boundary. The different elemental attributes are set-up accordingly.
+        """ 
+        This function finds for each element the edges lying on the computational domain's boundary. The different elemental attributes 
+        are set-up accordingly.
         
-        Input: - Tbound: # MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
+        Input: 
+            Tbound: # MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
         
         COMPUTED ATTRIBUTES:
                 * FOR ELEMENT
@@ -283,7 +335,7 @@ class Element:
                 * FOR INTERFACE SEGMENT
                     - Xint: PHYSICAL INTERFACE SEGMENT VERTICES COORDINATES 
                     - inter_edges: LOCAL INDICES OF VERTICES WHERE SEGMENT ENDS ARE LOCATED
-                """
+        """
         
         # OBTAIN REFERENCE ELEMENT COORDINATES
         XIe = ReferenceElementCoordinates(self.ElType,self.ElOrder)
@@ -323,7 +375,9 @@ class Element:
     ##################################################################################################
     
     def InterfaceNormal(self):
-        """ This function computes the interface normal vector pointing outwards. """
+        """ 
+        This function computes the interface normal vector pointing outwards. 
+        """
         
         # LEVEL-SET NODAL VALUES
         if self.Dom == 0:  # ELEMENT CONTAINING PLASMA/VACUUM INTERFACE
@@ -356,8 +410,16 @@ class Element:
                     SEGMENT.NormalVec = -1*ntest_xy
         return 
     
-    def ComputationalDomainBoundaryNormal(self,Xmax,Xmin,Ymax,Ymin):
-        """ This function computes the boundary edge(s) normal vector(s) pointing outwards. """
+    def ComputationalDomainBoundaryNormal(self,Rmax,Rmin,Zmax,Zmin):
+        """ 
+        This function computes the normal vector(s) pointing outwards for computational domain boundary edges 
+        
+        Input:
+            - Rmax (float): computational domain's maximal R coordinate
+            - Rmin (float): computational domain's minimal R coordinate
+            - Ymax (float): computational domain's maximal y coordinate
+            - Ymin (float): computational domain's minimal y coordinate
+        """
         
         # COMPUTE THE NORMAL VECTOR FOR EACH SEGMENT CONFORMING THE INTERFACE APPROXIMATION
         for INTERFACE in self.InterfApprox:
@@ -370,7 +432,7 @@ class Element:
                 Xtest = Xsegmean + 3*ntest                  # physical point on which to test the Level-Set 
                 
                 # CHECK IF TEST POINT IS OUTSIDE COMPUTATIONAL DOMAIN
-                if Xtest[0] < Xmin or Xmax < Xtest[0] or Xtest[1] < Ymin or Ymax < Xtest[1]:  
+                if Xtest[0] < Rmin or Rmax < Xtest[0] or Xtest[1] < Zmin or Zmax < Xtest[1]:  
                     SEGMENT.NormalVec = ntest
                 else: 
                     SEGMENT.NormalVec = -1*ntest
@@ -383,6 +445,27 @@ class Element:
         
     @staticmethod
     def HO_TRI_interf(XeLIN,ElOrder,XintHO,interfedge):
+        """
+        Generates a high-order triangular element from a linear one with nodal vertices coordinates XeLIN, incorporating high-order 
+        nodes on the edges and interior, and adapting if necessary one of the edges to the interface high-order approximation.
+
+        This function performs the following steps:
+            1. Extends the input linear (low-order) element coordinates with high-order nodes on the edges.
+            2. Adds interface high-order nodes if necessary on the edge indicated by `interfedge`. 
+            3. For triangular elements with an order of 3 or higher, adds an interior high-order node at 
+                the centroid of the element.
+
+        Input: 
+            - XeLIN (numpy.ndarray): An array of shape (n, 2) containing the coordinates of the linear (low-order) element nodes.
+            - ElOrder (int): The order of the element, determining the number of high-order nodes to be added.
+            - XintHO (numpy.ndarray): An array containing the high-order interface nodes (interface points) to be inserted along 
+                the specified edge.
+            - interfedge (int): The edge index where the interface high-order nodes should be inserted.
+
+        Output: 
+            XeHO (numpy.ndarray): An array containing the coordinates of the high-order element nodes, including those on 
+                the edges and interior.
+        """
         nedge = len(XeLIN[:,0])
         XeHO = XeLIN.copy()
         # MAKE IT HIGH-ORDER:
@@ -404,6 +487,27 @@ class Element:
 
     @staticmethod
     def HO_QUA_interf(XeLIN,ElOrder,XintHO,interfedge):
+        """
+        Generates a high-order quadrilateral element from a linear one with nodal vertices coordinates XeLIN, incorporating high-order 
+        nodes on the edges and interior, and adapting if necessary one of the edges to the interface high-order approximation.
+
+        This function performs the following steps:
+            1. Extends the input linear (low-order) element coordinates with high-order nodes on the edges.
+            2. Adds interface high-order nodes if necessary on the edge indicated by `interfedge`. 
+            3. For quadrilateral elements of order 2, adds an interior high-order node at the centroid of the element.
+            3. For quadrilateral elements of order 3, adds an interior high-order nodes.
+
+        Input: 
+            - XeLIN (numpy.ndarray): An array of shape (n, 2) containing the coordinates of the linear (low-order) element nodes.
+            - ElOrder (int): The order of the element, determining the number of high-order nodes to be added.
+            - XintHO (numpy.ndarray): An array containing the high-order interface nodes (interface points) to be inserted along 
+                the specified edge.
+            - interfedge (int): The edge index where the interface high-order nodes should be inserted.
+
+        Output: 
+            XeHO (numpy.ndarray): An array containing the coordinates of the high-order element nodes, including those on 
+                the edges and interior.
+        """
         nedge = len(XeLIN[:,0])
         XeHO = XeLIN.copy()
         for iedge in range(nedge):
@@ -455,7 +559,7 @@ class Element:
         #       - THE FIRST ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH IS SHARED BY BOTH EDGES INTERSECTING THE INTERFACE 
         #       - THE SECOND ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH DEFINES THE EDGE ON WHICH THE FIRST INTERSECTION POINT IS LOCATED
         #       - THE THIRD ROW CORRESPONDS TO THE VERTEX COORDINATES WHICH DEFINES THE EDGE ON WHICH THE SECOND INTERSECTION POINT IS LOCATED
-        # HOWEVER, WHEN LOOKING FOR THE LINEAR APPROXIMATION OF THE PHYSICAL INTERFACE THIS PROCESS IS ALREADY DONE, THEREFORE WE CAN SKIP IT. 
+        # HOWEVER, WHEN LOOKING FOR THE APPROXIMATION OF THE PHYSICAL INTERFACE THIS PROCESS IS ALREADY DONE, THEREFORE WE CAN SKIP IT. 
         # IF INPUT Xemod IS PROVIDED, THE TESSELLATION IS DONE ACCORDINGLY TO ADAPTED NODAL MATRIX Xemod WHICH IS ASSUMED TO HAS THE PREVIOUSLY DESCRIBED STRUCTURE.
         # IF NOT, THE COMMON NODE IS DETERMINED (THIS IS THE CASE FOR INSTANCE WHEN THE REFERENCE ELEMENT IS TESSELLATED).
 
@@ -559,11 +663,23 @@ class Element:
     ##################################################################################################
         
     def ComputeStandardQuadrature2D(self,NumQuadOrder):
-        """ This function computes the NUMERICAL INTEGRATION QUADRATURES corresponding to integrations in 2D for elements which ARE NOT CUT BY ANY INTERFACE. Hence, 
-        in such elements the standard FEM integration methodology is applied (STANDARD REFERENCE SHAPE FUNCTIONS EVALUATED AT STANDARD GAUSS INTEGRATION NODES). 
-        
-            Input: NumQuadOrder: Numerical integration Quadrature Order 
-            """
+        """
+        Computes the numerical integration quadratures for 2D elements that are not cut by any interface.
+        This function applies the standard FEM integration methodology using reference shape functions 
+        evaluated at standard Gauss integration nodes. It is designed for elements where no interface cuts 
+        through, and the traditional FEM approach is used for integration.
+
+        Input:
+            NumQuadOrder (int): The order of the numerical integration quadrature to be used.
+
+        This function performs the following tasks:
+            1. Computes the standard quadrature on the reference space in 2D.
+            2. Evaluates reference shape functions on the standard reference quadrature using Gauss nodes.
+            3. Precomputes the necessary integration entities, including:
+                - Jacobian inverse matrix for the transformation between reference and physical 2D spaces.
+                - Jacobian determinant for the transformation.
+                - Standard physical Gauss integration nodes mapped from the reference element.
+        """
         
         # COMPUTE THE STANDARD QUADRATURE ON THE REFERENCE SPACE IN 2D
         #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE SURFACES 
@@ -590,11 +706,23 @@ class Element:
         return    
             
     def ComputeComputationalDomainBoundaryQuadrature(self, NumQuadOrder):       
-        """ This function computes the NUMERICAL INTEGRATION QUADRATURES corresponding to integrations in 1D for elements which ARE NOT CUT by the interface. Hence, 
-        in such elements the standard FEM integration methodology is applied (STANDARD REFERENCE SHAPE FUNCTIONS EVALUATED AT STANDARD GAUSS INTEGRATION NODES). 
-        
-            Input: NumQuadOrder: Numerical integration Quadrature Order  
-        """   
+        """ 
+        Computes the numerical integration quadratures for 1D elements that are not cut by an interface. 
+        This function applies the standard FEM integration methodology using reference shape functions 
+        evaluated at standard Gauss integration nodes. It is used for elements that are not intersected by 
+        an interface and integrates along 1D boundaries (edges).
+
+        Input:
+            NumQuadOrder (int): The order of the numerical integration quadrature to be used for the 1D element.
+
+        This function performs the following tasks:
+            1. Computes the standard quadrature for the reference space in 1D.
+            2. Evaluates reference shape functions on the standard reference quadrature using Gauss nodes for 1D.
+            3. Precomputes the necessary integration entities, including:
+                - The Jacobian determinant for the transformation between reference and physical 1D spaces.
+                - The standard physical Gauss integration nodes mapped from the reference 1D element.
+            4. For each segment in the interface approximation, maps the 1D Gauss nodes and evaluates the shape functions.
+        """
          
         # COMPUTE THE STANDARD QUADRATURE ON THE REFERENCE SPACE IN 1D
         #### REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
@@ -627,20 +755,23 @@ class Element:
     
     
     def ComputeAdaptedQuadratures(self,NumQuadOrder):
-        """ This function computes the NUMERICAL INTEGRATION QUADRATURES corresponding to a 2D and 1D integration for elements which ARE CUT BY AN INTERFACE. 
-        In this case, an adapted quadrature is computed by modifying the standard approach.  
-        
-        Input: NumQuadOrder: Numerical integration Quadrature Order
-            
-            # IN ORDER TO COMPUTE THE ADAPTED QUADRATURES, WE NEED TO:
-            #    - ADAPTED QUADRATURE TO INTEGRATE OVER SUBELEMENTS:
-            #       1. PERFORM TESSELLATION ON THE REFERENCE ELEMENT -> OBTAIN NODAL COORDINATES OF REFERENCE SUBELEMENTS
-            #       2. MAP 2D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE SUBELEMENTS
-            #       3. MAP THE OBTAINED ADAPTED REFERENCE QUADRATURE TO PHYSICAL SPACE   
-            #    - ADAPTED QUADRATURE TO INTEGRATE OVER INTERFACE
-            #       1. MAP 1D REFERENCE GAUSS INTEGRATION NODES ON THE REFERENCE APPROXIMATED INTERFACE
-            #       2. MAP THE OBTAINED ADAPTED REFERENCE QUADRATURE TO PHYSICAL SPACE 
+        """ 
+        Computes the numerical integration quadratures for both 2D and 1D elements that are cut by an interface. 
+        This function uses an adapted quadrature approach, modifying the standard FEM quadrature method to accommodate 
+        interface interactions within the element.
+
+        Input:
+            NumQuadOrder (int): The order of the numerical integration quadrature to be used for both the 2D and 1D elements.
+
+        This function performs the following tasks:
+            1. Tessellates the reference element to account for elemental subelements.
+            2. Maps the tessellated subelements to the physical space.
+            3. Determines the level-set values for different domains (e.g., plasma, vacuum).
+            4. Generates subelement objects, assigning region flags and interpolating level-set values within subelements.
+            5. Computes integration quadrature for each subelement using adapted quadratures (2D).
+            6. Computes the quadrature for the elemental interface approximation (1D), mapping to physical elements.
         """
+        
         
         ######### ADAPTED QUADRATURE TO INTEGRATE OVER ELEMENTAL SUBELEMENTS (2D)
         # TESSELLATE REFERENCE ELEMENT
@@ -729,10 +860,27 @@ class Element:
     ##################################################################################################
     
     def IntegrateElementalDomainTerms(self,SourceTermg,*args):
-        """ Input: - SourceTermg: source term (plasma current) evaluated at physical gauss integration nodes
-                   - LHS: global system Left-Hand-Side matrix 
-                   - RHS: global system Reft-Hand-Side vector
-                    """
+        """ 
+        This function computes the elemental contributions to the global system by integrating the source terms over 
+        the elemental domain. It calculates the left-hand side (LHS) matrix and right-hand side (RHS) vector using 
+        Gauss integration nodes.
+
+        Input:
+            - SourceTermg (ndarray): The Grad-Shafranov equation source term evaluated at the physical Gauss integration nodes.
+        
+            - *args (tuple, optional): Additional arguments for specific cases, such as the dimensionless solution case where 
+                                `args[0]` might represent a scaling factor (R0).
+
+        This function computes:
+            1. The elemental contributions to the LHS matrix (stiffness term and gradient term).
+            2. The elemental contributions to the RHS vector (source term).
+
+        Output:
+            - LHSe (ndarray): The elemental left-hand side matrix (stiffness matrix) of the system.
+            - RHSe (ndarray): The elemental right-hand side vector of the system.
+
+        The function loops over Gauss integration nodes to compute these contributions and assemble the elemental system.
+        """
                     
         LHSe = np.zeros([len(self.Te),len(self.Te)])
         RHSe = np.zeros([len(self.Te)])
@@ -760,12 +908,28 @@ class Element:
     
     
     def IntegrateElementalInterfaceTerms(self,beta,*args):
-        """ Input: - PSIgseg: Interface condition, evaluated at physical gauss integration nodes
-                   - beta: Nitsche's method penalty parameter
-                   - LHS: global system Left-Hand-Side matrix 
-                   - RHS: global system Reft-Hand-Side vector 
-                    """
-                    
+        """ 
+        This function computes the elemental contributions to the global system from the interface terms, using 
+        Nitsche's method. It integrates the interface conditions over the elemental interface approximation segments. 
+        It calculates the left-hand side (LHS) matrix and right-hand side (RHS) vector using Gauss integration nodes.
+
+        Input:
+            - beta (float): The penalty parameter for Nitsche's method, which controls the strength of the penalty term.
+        
+            - *args (tuple, optional): Additional arguments for specific cases, such as the dimensionless solution case where 
+                                `args[0]` might represent a scaling factor (R0).
+
+        This function computes:
+            1. The elemental contributions to the LHS matrix (including Dirichlet boundary term, symmetric Nitsche's term, and penalty term).
+            2. The elemental contributions to the RHS vector (including symmetric Nitsche's term and penalty term).
+
+        Output: 
+            - LHSe (ndarray): The elemental left-hand side matrix (stiffness matrix) of the system, incorporating Nitsche's method.
+            - RHSe (ndarray): The elemental right-hand side vector of the system, incorporating Nitsche's method.
+
+        The function loops over interface segments and Gauss integration nodes to compute these contributions and assemble the global system.
+        """
+        
         LHSe = np.zeros([len(self.Te),len(self.Te)])
         RHSe = np.zeros([len(self.Te)])
     
@@ -804,6 +968,18 @@ class Element:
     ##################################################################################################
         
 def ElementalNumberOfEdges(elemType):
+    """ 
+    This function returns the number of edges for a given element type. The element types are represented by integers:
+    - 0: For 1D elements (e.g., line segments)
+    - 1: For 2D triangular elements
+    - 2: For 2D quadrilateral elements
+    
+    Input:
+        elemType (int): The type of element for which to determine the number of edges. The possible values are:
+    
+    Output: 
+        numedges (int): The number of edges for the given element type. 
+    """
     match elemType:
         case 0:
             numedges = 1
@@ -815,7 +991,26 @@ def ElementalNumberOfEdges(elemType):
 
     
 def ElementalNumberOfNodes(elemType, elemOrder):
-    # ELEMENT TYPE -> 0: SEGMENT ;  1: TRIANGLE  ; 2: QUADRILATERAL
+    """ 
+    This function returns the number of nodes and the number of edges for a given element type and order. 
+    The element types are represented by integers:
+        - 0: 1D element (line segment)
+        - 1: 2D triangular element
+        - 2: 2D quadrilateral element
+    
+    The element order corresponds to the polynomial degree of the elemental shape functions.
+
+    Input:
+        - elemType (int): The type of element. Possible values:
+                        - 0: 1D element (segment)
+                        - 1: 2D triangular element
+                        - 2: 2D quadrilateral element
+        - elemOrder (int): The order (degree) of the element, determining the number of nodes.
+
+    Output: 
+        - n (int): The number of nodes for the given element type and order.
+        - nedge (int): The number of edges for the given element order.
+    """
     match elemType:
         case 0:
             n = elemOrder +1        
@@ -840,6 +1035,20 @@ def ElementalNumberOfNodes(elemType, elemOrder):
     
     
 def ReferenceElementCoordinates(elemType,elemOrder):
+    """
+    Returns nodal coordinates matrix for reference element of type elemType and order elemOrder.
+    
+    Input:
+        - elemType (int): The type of element. Possible values:
+                        - 0: 1D element (segment)
+                        - 1: 2D triangular element
+                        - 2: 2D quadrilateral element
+        - elemOrder (int): The order (degree) of the element, determining the number of nodes.
+
+    Ouput:
+        Xe (ndarray): reference element nodal coordinates matrix
+    """
+    
     match elemType:
         case 0:    # LINE (1D ELEMENT)
             match elemOrder:

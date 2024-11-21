@@ -222,12 +222,20 @@ class GradShafranovCutFEM:
         return
     
     def print_all_attributes(self):
-        """ Function which prints all object EQUILI attributes and their corresponding values. """
+        """
+        Display all attributes of the object and their corresponding values.
+
+        This method iterates over all attributes of the instance and prints
+        them in the format: attribute_name: value.
+        """
         for attribute, value in vars(self).items():
             print(f"{attribute}: {value}")
         return
     
     def ALYA2Py(self):
+        """ 
+        Translate ALYA elemental type to EQUILIPY elemental ElType and ElOrder.
+        """
         match self.ElTypeALYA:
             case 2:
                 self.ElType = 0
@@ -264,7 +272,9 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def ReadMesh(self):
-        """ Reads input mesh data files. """
+        """ 
+        Read input mesh data files, .dom.dat and .geo.dat, and build mesh simulation attributes. 
+        """
         
         print("     -> READ MESH DATA FILES...",end='')
         # READ DOM FILE .dom.dat
@@ -373,17 +383,9 @@ class GradShafranovCutFEM:
         return
     
     def ReadEQUILIdata(self):
-        """ Reads problem data from input file equ.dat. That is:
-                - PLASMA BOUNDARY (FIXED/FREE BOUNDARY)
-                - PLASMA REGION GEOMETRY (USE 1srt WALL OR TRUE F4E SHAPE)
-                - PLASMA CURRENT MODELISATION
-                - VACUUM VESSEL CONSIDERED GEOMETRY
-                - TOTAL CURRENT
-                - GEOMETRICAL PARAMETERS
-                - LOCATION AND CURRENT OF EXTERNAL COILS CONFINING THE PLASMA
-                - PLASMA PROPERTIES
-                - NUMERICAL TREATMENT PARAMETERS
-                """
+        """ 
+        Reads problem data from input file equ.dat.      
+        """
         
         #############################################
         # INTER-CODE FUNCTIONS TO READ INPUT PARAMETERS BY BLOCKS 
@@ -560,6 +562,8 @@ class GradShafranovCutFEM:
         
         # TOKAMAK'S 1rst WALL GEOMETRY COEFFICIENTS, USED ALSO FOR LINEAR PLASMA MODEL ANALYTICAL SOLUTION (INITIAL GUESS)
         self.coeffsLINEAR = self.ComputeLinearSolutionCoefficients()
+        # ZHENG ANALYTICAL SOLUTION COEFFICIENTS
+        self.coeffsZHENG = self.ComputeZhengSolutionCoefficients()
         
         if self.PLASMA_CURRENT == self.PROFILES_CURRENT:
             # COMPUTE PRESSURE PROFILE FACTOR
@@ -583,6 +587,9 @@ class GradShafranovCutFEM:
         return
     
     def ReadFixdata(self):
+        """
+        Read fix set data from input file .fix.dat. 
+        """
         print("     -> READ FIX DATA FILE...",end='')
         # READ EQU FILE .equ.dat
         FixDataFile = self.mesh_folder +'/'+ 'TS-CUTFEM-' + self.MESH +'.fix.dat'
@@ -619,15 +626,18 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def ComputeLinearSolutionCoefficients(self):
-        """ Computes the coeffients for the magnetic flux in the linear source term case, that is for 
-                    GRAD-SHAFRANOV EQ:  DELTA*(PSI) = R^2   (plasma current is linear such that Jphi = R/mu0)
-            for which the exact solution is 
-                    PSI = R^4/8 + D1 + D2*R^2 + D3*(R^4-4*R^2*Z^2)
-                This function returns coefficients D1, D2, D3
-                    
-            Input: - epsilon: magnetic confinement cross-section inverse aspect ratio
-                   - kappa: magnetic confinement cross-section elongation
-                   - delta: magnetic confinement cross-section triangularity """
+        """ 
+        Computes the coeffients for the magnetic flux in the linear source term case, that is for 
+                GRAD-SHAFRANOV EQ:  DELTA*(PSI) = R^2   (plasma current is linear such that Jphi = R/mu0)
+        for which the exact solution is 
+                PSI = R^4/8 + D1 + D2*R^2 + D3*(R^4-4*R^2*Z^2)
+            This function returns coefficients D1, D2, D3
+                
+        Geometrical dimensionless parameters: 
+                - epsilon: magnetic confinement cross-section inverse aspect ratio
+                - kappa: magnetic confinement cross-section elongation
+                - delta: magnetic confinement cross-section triangularity 
+        """
                 
         A = np.array([[1, (1+self.epsilon)**2, (1+self.epsilon)**4], 
                     [1, (1-self.epsilon)**2, (1-self.epsilon)**4],
@@ -645,10 +655,10 @@ class GradShafranovCutFEM:
         Rt = self.R0 - self.delta*a    # PLASMA SHAPE HIGHEST POINT R COORDINATE
         Zt = self.kappa*a              # PLASMA SHAPE HIGHEST POINT Z COORDINATE
         
-        self.coeffsZHENG = np.zeros([6])
+        coeffs = np.zeros([6])
         
         # SET THE COEFFICIENT A2 TO 0 FOR SIMPLICITY
-        self.coeffsZHENG[5] = 0
+        coeffs[5] = 0
         # COMPUTE COEFFICIENT A1 BY IMPOSING A CONSTANT TOTAL TOROIDAL PLASMA CURRENT Ip
         #                   Jphi = (A1*R**2 - A2)/ R*mu0 
         # IF A2 = 0, WE HAVE THEN       Jphi = A1* (R/mu0)   THAT IS WHAT WE NEED TO INTEGRATE
@@ -658,7 +668,7 @@ class GradShafranovCutFEM:
         
         #self.coeffsZHENG[4] = self.TOTAL_CURRENT/self.PlasmaDomainIntegral(fun)
         
-        self.coeffsZHENG[4] = -0.1
+        coeffs[4] = -0.1
         
         # FOR COEFFICIENTS C1, C2, C3 AND C4, WE SOLVE A LINEAR SYSTEM OF EQUATIONS BASED ON THE PLASMA SHAPE GEOMETRY
         A = np.array([[1,Ri**2,Ri**4,np.log(Ri)*Ri**2],
@@ -666,17 +676,30 @@ class GradShafranovCutFEM:
                       [1,Rt**2,(Rt**2-4*Zt**2)*Rt**2,np.log(Rt)*Rt**2-Zt**2],
                       [0,2,4*(Rt**2-2*Zt**2),2*np.log(Rt)+1]])
         
-        b = np.array([[-(self.coeffsZHENG[4]*Ri**4)/8],
-                      [-(self.coeffsZHENG[4]*Ro**4)/8],
-                      [-(self.coeffsZHENG[4]*Rt**4)/8+(self.coeffsZHENG[5]*Zt**2)/2],
-                      [-(self.coeffsZHENG[4]*Rt**2)/2]])
+        b = np.array([[-(coeffs[4]*Ri**4)/8],
+                      [-(coeffs[4]*Ro**4)/8],
+                      [-(coeffs[4]*Rt**4)/8+(coeffs[5]*Zt**2)/2],
+                      [-(coeffs[4]*Rt**2)/2]])
         
         coeffs = np.linalg.solve(A,b)
-        self.coeffsZHENG[:4] = coeffs.T[0].tolist()
-        return 
+        coeffs[:4] = coeffs.T[0].tolist()
+        return coeffs
     
     def PSIAnalyticalSolution(self,X,MODEL):
-        """ Function which computes the ANALYTICAL SOLUTION FOR THE LINEAR PLASMA MODEL at point with coordinates X. """
+        """
+        Compute the analytical solution for PSI at point X based on the specified model.
+
+        Input:
+            - X (array-like): Spatial coordinates [X1, X2].
+            - MODEL (str): The model to use for the computation. Options include:
+                  -> LINEAR_CURRENT: Linear current model.
+                  -> NONLINEAR_CURRENT: Nonlinear current model.
+                  -> ZHENG_CURRENT: Zheng's model.
+                  -> FAKE: A mock model for testing purposes.
+
+        Output:
+            float: The computed analytical solution for PSI.
+        """
         match MODEL:
             case self.LINEAR_CURRENT:
                 # DIMENSIONALESS COORDINATES
@@ -705,7 +728,16 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def Jphi(self,X,PSI):
-        # COMPUTES THE SOURCE TERM Jphi, WHICH GOES IN THE GRAD-SHAFRANOV EQ. RIGHT-HAND-SIDE     mu0*R*Jphi
+        """
+        Compute the toroidal plasma current density (J_phi) based on the specified plasma current model.
+
+        Input:
+            - X (array-like): Spatial coordinates [X1, X2].
+            - PSI (float): Poloidal flux function value at the given coordinates.
+
+        Output:
+            Jphi (float): The computed toroidal plasma current density (J_phi).
+        """
         match self.PLASMA_CURRENT:
             case self.LINEAR_CURRENT:
                 # COMPUTE LINEAR MODEL PLASMA CURRENT
@@ -730,7 +762,15 @@ class GradShafranovCutFEM:
     ######## PLASMA PRESSURE MODELING
     
     def dPdPSI(self,PSI):
-        # FUNCTION MODELING PLASMA PRESSURE DERIVATIVE PROFILE 
+        """
+        Compute the derivative of the plasma pressure profile with respect to PSI.
+
+        Input:
+            PSI (float): Poloidal flux function value.
+
+        Output:
+            dp (float): The computed derivative of the plasma pressure profile (dP/dPSI).
+        """ 
         dp = self.P0*self.n_p*(PSI**(self.n_p-1))
         return dp
     
@@ -743,6 +783,16 @@ class GradShafranovCutFEM:
     
     
     def SourceTerm(self,X,PSI):
+        """
+        Compute the source term for the plasma current based on the specified plasma current model.
+
+        Input:
+            - X (array-like): Spatial coordinates [X1, X2].
+            - PSI (float): Poloidal flux function value.
+
+        Output:
+            source (float): The computed source term for the plasma current.
+        """
         match self.PLASMA_CURRENT:
             case self.LINEAR_CURRENT:
                 Xstar = X/self.R0
@@ -921,15 +971,20 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def ComputePSI_B(self):
-        
-        """ FUNCTION TO COMPUTE THE COMPUTATIONAL DOMAIN BOUNDARY VALUES FOR PSI, PSI_B, ON BOUNDARY ELEMENT. 
-        THESE MUST BE TREATED AS NATURAL BOUNDARY CONDITIONS (DIRICHLET BOUNDARY CONDITIONS).
-        FOR self.FREE_BOUNDARY BOUNDARY PROBLEM, SUCH VALUES ARE OBTAINED BY ACCOUNTING FOR THE CONTRIBUTIONS FROM THE EXTERNAL
-        FIXED COILS AND THE CONTRIBUTION FROM THE PLASMA CURRENT ITSELF, FOR WHICH WE 
-        INTEGRATE THE PLASMA'S GREEN FUNCTION."""
+        """
+        Compute the boundary values of the poloidal flux function (PSI_B) on the vacuum vessel first wall approximation.
+        Such values are obtained by summing the contributions from the external magnets, COILS and SOLENOIDS, and the 
+        contribution from the plasma current itself using the Green's function.
+
+        Output:
+            PSI_B (ndarray): Array of boundary values for the poloidal flux function (PSI_B) 
+                            defined over the nodes of the vacuum vessel's boundary.
+        """
         
         def ellipticK(k):
-            """ COMPLETE ELLIPTIC INTEGRAL OF 1rst KIND """
+            """ 
+            COMPLETE ELLIPTIC INTEGRAL OF 1rst KIND 
+            """
             pk=1.0-k*k
             if k == 1:
                 ellipticK=1.0e+16
@@ -940,7 +995,9 @@ class GradShafranovCutFEM:
             return ellipticK
 
         def ellipticE(k):
-            """COMPLETE ELLIPTIC INTEGRAL OF 2nd KIND"""
+            """
+            COMPLETE ELLIPTIC INTEGRAL OF 2nd KIND
+            """
             pk = 1 - k*k
             if k == 1:
                 ellipticE = 1
@@ -951,23 +1008,12 @@ class GradShafranovCutFEM:
             return ellipticE
         
         def GreenFunction(Xb,Xp):
-            """ GREEN FUNCTION CORRESPONDING TO THE TOROIDAL ELLIPTIC OPERATOR """
+            """ 
+            GREEN FUNCTION ASSOCIATED TO THE GRAD-SHAFRANOV'S EQUATION ELLIPTIC OPERATOR. 
+            """
             k= np.sqrt(4*Xb[0]*Xp[0]/((Xb[0]+Xp[0])**2 + (Xp[1]-Xb[1])**2))
             Greenfun = (1/(2*np.pi))*(np.sqrt(Xp[0]*Xb[0])/k)*((2-k**2)*ellipticK(k)-2*ellipticE(k))
             return Greenfun
-        
-        """ RELEVANT ATTRIBUTES:
-                # Nbound: NUMBER OF COMPUTATIONAL DOMAIN'S BOUNDARIES (NUMBER OF ELEMENTAL EDGES)
-                # Nnbound: NUMBER OF NODES ON COMPUTATIONAL DOMAIN'S BOUNDARY
-                # BoundaryNodes: LIST OF NODES (GLOBAL INDEXES) ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
-                # Tbound: MESH BOUNDARIES CONNECTIVITY MATRIX  (LAST COLUMN YIELDS THE ELEMENT INDEX OF THE CORRESPONDING BOUNDARY EDGE)
-                # Ncoils: TOTAL NUMBER OF COILS
-                # Xcoils: COILS' COORDINATE MATRIX 
-                # Icoils: COILS' CURRENT
-                # Nsolenoids: TOTAL NUMBER OF SOLENOIDS
-                # Xsolenoids: SOLENOIDS' COORDINATE MATRIX
-                # Nturnssole: SOLENOIDS' NUMBER OF TURNS
-                # Isolenoids: SOLENOIDS' CURRENT"""
                 
         PSI_B = np.zeros([self.NnFW])    
         # FOR FIXED PLASMA BOUNDARY PROBLEM THE VACUUM VESSEL BOUNDARY VALUES PSI_B ARE IRRELEVANT ->> PSI_B = 0
@@ -1029,13 +1075,14 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def ClassifyElements(self):
-        """ Function that separates the elements into 5 groups: 
-                - PlasmaElems: elements inside the plasma region P(PSI) where the plasma current is different from 0
-                - VacuumElems: elements outside the plasma region P(PSI) where the plasma current is 0
-                - PlasmaBoundElems: ELEMENTS CONTAINING THE INTERFACE BETWEEN PLASMA AND VACUUM
-                - VacVessWallElems: ELEMENTS CONTAINING THE VACUUM VESSEL FIRST WALL 
-                - ExteriorElems: ELEMENTS WHICH ARE OUTSIDE OF THE VACUUM VESSEL FIRST WALL (NON-EXISTING IF FIRST WALL IS COMPUTATIONAL DOMAIN)
-                """
+        """ 
+        Function that separates the elements into 5 groups: 
+                - PlasmaElems: elements inside the plasma region 
+                - PlasmaBoundElems: (cut) elements containing the plasma region boundary 
+                - VacuumElems: elements outside the plasma region but inside the vacuum vessel
+                - VacVessWallElems: (cut) elements containing the vacuum vessel boundary (first wall) 
+                - ExteriorElems: elements outside the vacuum vessel 
+        """
                 
         """ FOR HIGH ORDER ELEMENTS (QUADRATIC, CUBIC...), ELEMENTS LYING ON GEOMETRY BOUNDARIES OR INTERFACES MAY BE CLASSIFIED AS SUCH DUE TO
         THE LEVEL-SET SIGN ON NODES WHICH ARE NOT VERTICES OF THE ELEMENT ('HIGH ORDER' NODES). IN CASES WHERE ON SUCH NODES POSSES DIFFERENT SIGN, THIS MAY LEAD TO AN INTERFACE
@@ -1163,8 +1210,18 @@ class GradShafranovCutFEM:
     
     # SEARCH ELEMENT CONTAINING POINT IN MESH
     def SearchElement(self,X,searchelements):
-        # Function which finds the element among the elements list containing the point with coordinates X. 
-        
+        """
+        Identify the element within a specified list searchelements and contains a given point X.
+
+        Input:
+            - X (array-like): Coordinates of the point to locate, specified as [x, y].
+            - searchelements (list of int): List of element indices to search within.
+
+        Output:
+            elem (int or None): Index of the element containing the point X. 
+                                Returns None if no element contains the point.
+        """
+
         if self.ElType == 1: # FOR TRIANGULAR ELEMENTS
             for elem in searchelements:
                 Xe = self.Elements[elem].Xe
@@ -1188,23 +1245,18 @@ class GradShafranovCutFEM:
     
     
     def ComputeCriticalPSI(self,PSI):
-        """ Function which computes the values of PSI at the:
-                - MAGNETIC AXIS ->> PSI_0 
-                - SEPARATRIX (LAST CLOSED MAGNETIC SURFACE) / SADDLE POINT ->> PSI_X 
-        These values are used to NORMALISE PSI. 
-        
-        THE METHODOLOGY IS THE FOLLOWING:
-            1. OBTAIN CANDIDATE POINTS FOR SOLUTIONS OF EQUATION     NORM(GRAD(PSI))^2 = 0
-            2. USING A NEWTON METHOD (OR SOLVER), FIND SOLUTION OF    NORM(GRAD(PSI))^2 = 0
-            3. CHECK HESSIAN AT SOLUTIONS TO DIFFERENTIATE BETWEEN EXTREMUM AND SADDLE POINT
-            
-        THIS IS WHAT WE WOULD DO ANALYTICALLY. IN THE NUMERICAL CASE, WE DO:
-            1. INTERPOLATE PSI VALUES ON A FINER STRUCTURED MESH USING PSI ON NODES
-            2. COMPUTE GRAD(PSI) WITH FINER MESH VALUES USING FINITE DIFFERENCES
-            3. OBTAIN CANDIDATE POINTS ON FINER MESH FOR SOLUTIONS OF EQUATION     NORM(GRAD(PSI))^2 = 0
-            4. USING A SOLVER, FIND SOLUTION OF  NORM(GRAD(PSI))^2 = 0   BY EVALUATING AN INTERPOLATION OF GRAD(PSI)
-            5. CHECK HESSIAN AT SOLUTIONS
-            6. INTERPOLATE VALUE OF PSI AT CRITICAL POINT
+        """
+        Compute the critical values of the magnetic flux function (PSI).
+
+        Input:
+            PSI (array-like): Poloidal magnetic flux function values at the computational domain nodes.
+
+        The following attributes are updated:
+                - self.PSI_0 (float): Value of PSI at the magnetic axis (local extremum).
+                - self.PSI_X (float): Value of PSI at the separatrix (saddle point), if applicable.
+                - self.Xcrit (array-like): Coordinates and element indices of critical points:
+                    - self.Xcrit[1,0,:] -> Magnetic axis ([R, Z, element index]).
+                    - self.Xcrit[1,1,:] -> Saddle point ([R, Z, element index]).
         """
         # INTERPOLATION OF GRAD(PSI)
         def gradPSI(X,Rfine,Zfine,gradPSIfine):
@@ -1309,7 +1361,9 @@ class GradShafranovCutFEM:
     
     
     def NormalisePSI(self):
-        # NORMALISE SOLUTION OBTAINED FROM SOLVING CutFEM SYSTEM OF EQUATIONS USING CRITICAL PSI VALUES, PSI_0 AND PSI_X
+        """
+        Normalize the magnetic flux function (PSI) based on critical PSI values (PSI_0 and PSI_X).
+        """
         if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY or self.PLASMA_CURRENT == self.PROFILES_CURRENT:
             for i in range(self.Nn):
                 self.PSI_NORM[i,1] = (self.PSI[i]-self.PSI_X)/np.abs(self.PSI_0-self.PSI_X)
@@ -1324,7 +1378,9 @@ class GradShafranovCutFEM:
         return self.PlasmaDomainIntegral(self.Jphi)
     
     def ComputeTotalPlasmaCurrentNormalization(self):
-        """ Function that computes the correction factor so that the total current flowing through the plasma region is constant and equal to input file parameter TOTAL_CURRENT. """
+        """
+        Compute and apply a correction factor to ensure the total plasma current in the computational domain matches the specified input parameter `TOTAL_CURRENT`.
+        """
         if self.PLASMA_CURRENT == self.PROFILES_CURRENT:
             # COMPUTE TOTAL PLASMA CURRENT    
             Tcurrent = self.ComputeTotalPlasmaCurrent()
@@ -1343,7 +1399,17 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def CheckConvergence(self,VALUES):
-        
+        """
+        Function to evaluate convergence criteria during iterative computation. 
+        Based on the type of value being checked (`PSI_NORM` or `PSI_B`), it calculates 
+        the L2 norm of the residual between consecutive iterations and determines if the solution 
+        has converged to the desired tolerance.
+
+        Input:
+            VALUES (str) Specifies the variable type to check for convergence:
+                - "PSI_NORM" : Normalized magnetic flux (used for internal convergence).
+                - "PSI_B"    : Boundary flux (used for external convergence).
+        """
         if VALUES == "PSI_NORM":
             # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
             if np.linalg.norm(self.PSI_NORM[:,1]) > 0:
@@ -1376,15 +1442,17 @@ class GradShafranovCutFEM:
         return 
     
     def UpdatePSI(self,VALUES):
-        
+        """
+        Updates the PSI arrays.
+
+        Input:
+            VALUES (str) 
+                - 'PSI_NORM' : Updates the normalized PSI values.
+                - 'PSI_B'    : Updates the boundary PSI values, or stores the converged values if external convergence is reached.
+        """
         if VALUES == 'PSI_NORM':
             self.PSI_NORM[:,0] = self.PSI_NORM[:,1]
             self.Xcrit[0,:,:] = self.Xcrit[1,:,:]
-            
-            """if self.converg_INT == False:
-                self.PSI_NORM[:,0] = self.PSI_NORM[:,1]
-            elif self.converg_INT == True:
-                pass"""
         
         elif VALUES == 'PSI_B':
             if self.converg_EXT == False:
@@ -1392,17 +1460,25 @@ class GradShafranovCutFEM:
                 self.PSI_NORM[:,0] = self.PSI_NORM[:,1]
             elif self.converg_EXT == True:
                 self.PSI_CONV = self.PSI_NORM[:,1]
-        
         return
     
     def UpdateElementalPSI(self):
-        """ Function to update the values of PSI_NORM in all mesh elements """
+        """ 
+        Function to update the elemental PSI values, respect to PSI_NORM.
+        """
         for element in self.Elements:
             element.PSIe = self.PSI_NORM[element.Te,0]  # TAKE VALUES OF ITERATION N
         return
     
     def UpdateElementalPSIg(self,BOUNDARY):
-        """ FUNCTION WHICH UPDATES THE PSI VALUE CONSTRAINTS PSIgseg ON ALL INTERFACE APPROXIMATION SEGMENTS INTEGRATION POINTS. """
+        """
+        Updates the PSI value constraints (PSIgseg) for all interface approximation segments at integration points.
+
+        Input:
+            BOUNDARY (str): boundary approximation on which the constraint values will be updated 
+                - 'PLASMAbound' : Updates PSI values for plasma boundary elements.
+                - 'VACVESbound' : Updates PSI values for vacuum vessel boundary elements.
+        """
         
         if BOUNDARY == self.PLASMAbound:
             for ielem in self.PlasmaBoundElems:
@@ -1451,8 +1527,10 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def PlasmaDomainIntegral(self,fun):
-        """ INTEGRATES FUNCTION fun OVER THE ENTIRE PLASMA DOMAIN.
-                fun = fun(X,PSI)        """
+        """ 
+        Integrates function fun over plasma region surface, such that
+                fun = fun(X,PSI)        
+        """
         
         integral = 0
         # INTEGRATE OVER PLASMA ELEMENTS
@@ -1485,6 +1563,11 @@ class GradShafranovCutFEM:
         return integral
     
     def ComputeActiveNodes(self):
+        """
+        Computes the active nodes based on the plasma boundary conditions.
+            - If the plasma boundary is fixed, it includes all nodes in the plasma-boundary and plasma elements.
+            - If the plasma boundary is free, it considers all nodes in the domain.
+        """
         if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY:
             plasma_elems = np.concatenate((self.PlasmaBoundElems,self.PlasmaElems), axis=0)
             self.activenodes = set()
@@ -1506,6 +1589,15 @@ class GradShafranovCutFEM:
         return
     
     def ComputeInterfaceNumberNodes(self,BOUNDARY):
+        """
+        Computes the total number of nodes for a given boundary condition.
+
+        Input:
+            BOUNDARY (str): Boundary on which to compute the number of nodes ('PLASMAbound' or 'VACVESbound').
+
+        Output:
+            nnodes (int): The total number of nodes on the specified boundary.
+        """
         if BOUNDARY == self.PLASMAbound:
             elements = self.PlasmaBoundElems
         elif BOUNDARY == self.VACVESbound:
@@ -1522,7 +1614,12 @@ class GradShafranovCutFEM:
     ##################### INITIALISATION 
     
     def InitialGuess(self):
-        """ This function computes the problem's initial guess, which is taken as the LINEAR CASE SOLUTION WITH SOME RANDOM NOISE. """
+        """ 
+        This function computes the problem's initial guess for PSI_NORM. 
+        
+        Output: 
+            PSI0: PSI_NORM initial values
+        """
         PSI0 = np.zeros([self.Nn])
         if self.PLASMA_CURRENT == self.PROFILES_CURRENT: 
             for i in range(self.Nn):
@@ -1534,13 +1631,15 @@ class GradShafranovCutFEM:
         return PSI0
     
     def InitialiseLevelSets(self):
-        """ COMPUTE THE INITIAL LEVEL-SET FUNCTION VALUES DESCRIBING:
-            ->> THE INITIAL PLASMA REGION GEOMETRY: 
-                    -> PLASMA REGION (INSIDE) CHARACTERISED BY NEGATIVE SIGN OF LEVEL-SET FUNCTION
-                    -> PLASMA REGION CAN BE DEFINED EITHER BY F4E GEOMETRY OR WITH SAME SHAPE AS VACCUM VESSEL FIRST WALL
-                    -> IF VACCUM VESSEL BOUNDARY IS TAKEN AS THE FIRST WALL, THE PLASMA REGION MUST BE DEFINED BY OTHER THAN THE FIRST WALL (INCOMPATIBILITY PROBLEM) 
-            ->> THE FIXED VACUUM VESSEL FIRST WALL GEOMETRY:
-                    -> ONLY NECESSARY WHEN VACUUM_VESSEL FIRST WALL IS OTHER THAN AS THE COMPUTATIONAL DOMAIN """
+        """
+        Computes the initial level-set function values describing the plasma and vacuum vessel boundaries.
+
+        Updates values for:
+            - PlasmaBoundLevSet (ndarray): The level-set function values representing the plasma region geometry. 
+            Negative values represent inside the plasma region.
+            - VacVessWallLevSet (ndarray): The level-set function values representing the vacuum vessel first wall geometry. 
+            Negative values represent inside the vacuum vessel.
+        """
             
         self.PlasmaBoundLevSet = np.zeros([self.Nn])
         if self.PLASMA_GEOMETRY == self.FIRST_WALL:  # IN THIS CASE, THE PLASMA REGION SHAPE IS TAKEN AS THE SHAPE OF THE TOKAMAK'S FIRST WALL
@@ -1565,13 +1664,25 @@ class GradShafranovCutFEM:
         return 
     
     def InitialiseElements(self):
-        """ Function initialising attribute ELEMENTS which is a list of all elements in the mesh. """
+        """ 
+        Function initialising attribute ELEMENTS which is a list of all elements in the mesh. 
+        """
         self.Elements = [Element(e,self.ElType,self.ElOrder,self.X[self.T[e,:],:],self.T[e,:],self.PlasmaBoundLevSet[self.T[e,:]],
                                  self.VacVessWallLevSet[self.T[e,:]]) for e in range(self.Ne)]
         return
     
     def InitialisePSI(self):  
-        """ INITIALISE PSI VECTORS WHERE THE DIFFERENT SOLUTIONS WILL BE STORED ITERATIVELY DURING THE SIMULATION AND COMPUTE INITIAL GUESS."""
+        """
+        Initializes the PSI vectors used for storing iterative solutions during the simulation and computes the initial guess.
+
+        This function:
+            - Computes the number of nodes on boundary approximations for the plasma boundary and vacuum vessel first wall.
+            - Initializes PSI solution arrays.
+            - Computes an initial guess for the normalized PSI values and assigns them to the corresponding elements.
+            - Computes initial vacuum vessel first wall PSI values and stores them for the first iteration.
+            - Assigns boundary constraint values for both the plasma and vacuum vessel boundaries.
+        """
+        
         ####### COMPUTE NUMBER OF NODES ON BOUNDARIES' APPROXIMATIONS
         # COMPUTE NUMBER OF NODES ON VACUUM VESSEL FIRST WALL APPROXIMATION 
         self.NnFW = self.ComputeInterfaceNumberNodes(self.VACVESbound)
@@ -1607,14 +1718,21 @@ class GradShafranovCutFEM:
         # ASSIGN VACUUM VESSEL BOUNDARY VALUES
         self.UpdateElementalPSIg(self.VACVESbound)
         print('Done!')    
-        
         return
     
     
     def Initialization(self):
-        """ Routine which initialises all the necessary elements in the problem """
-        
-        self.ComputeZhengSolutionCoefficients()
+        """
+        Initializes all necessary elements for the simulation:
+            - Initializes the level-set function for plasma and vacuum vessel boundaries.
+            - Initializes the elements in the computational domain.
+            - Classifies elements and writes their classification.
+            - Computes the active nodes in the system.
+            - Approximates the vacuum vessel first wall and plasma/vacuum interface.
+            - Computes numerical integration quadratures for the problem.
+            - Initializes PSI unknowns and computes initial guesses.
+            - Writes the initial PSI, normalized PSI, and vacuum vessel boundary PSI values.
+        """
         
         # INITIALISE LEVEL-SET FUNCTION
         print("     -> INITIALISE LEVEL-SET...", end="")
@@ -1641,8 +1759,8 @@ class GradShafranovCutFEM:
         self.ComputeFirstWallApproximation()
         print("Done!")
 
-        # COMPUTE PLASMA/VACUUM INTERFACE LINEAR APPROXIMATION
-        print("     -> APPROXIMATE PLASMA/VACUUM INTERFACE...", end="")
+        # COMPUTE PLASMA BOUNDARY APPROXIMATION
+        print("     -> APPROXIMATE PLASMA BOUNDARY INTERFACE...", end="")
         self.ComputePlasmaBoundaryApproximation()
         print("Done!")
         
@@ -1663,7 +1781,17 @@ class GradShafranovCutFEM:
     ##################### OPERATIONS ON COMPUTATIONAL DOMAIN'S BOUNDARY EDGES #########################
     
     def ComputeFirstWallApproximation(self):
-        """ APPROXIMATE/IDENTIFY LINEAR EDGES CONFORMING THE VACUUM VESSEL FIRST WALL GEOMETRY ON EACH EDGE. COMPUTE NORMAL VECTORS FOR EACH EDGE. """
+        """ 
+        Computes the elemental cutting segments conforming to the vacuum vessel first wall approximation.
+        Computes normal vectors for each segment.
+
+        Depending on the configuration of the vacuum vessel, this function either:
+        - For the computational domain, identifies the elemental edges conforming the boundary and computes normal vectors for each edge.
+        - For the first wall, approximates the boundary with segments and computes their respective normal vectors.
+
+        The function double checks the orthogonality of the normal vectors.
+        """
+        
         if self.VACUUM_VESSEL == self.COMPUTATIONAL:
             for elem in self.VacVessWallElems:
                 # IDENTIFY COMPUTATIONAL DOMAIN'S BOUNDARIES CONFORMING VACUUM VESSEL FIRST WALL
@@ -1681,7 +1809,12 @@ class GradShafranovCutFEM:
         return
     
     def ComputePlasmaBoundaryApproximation(self):
-        """ Compute the coordinates for the points describing the interface linear approximation. """
+        """ 
+        Computes the elemental cutting segments conforming to the plasma boundary approximation.
+        Computes normal vectors for each segment.
+
+        The function double checks the orthogonality of the normal vectors. 
+        """
         for inter, elem in enumerate(self.PlasmaBoundElems):
             # APPROXIMATE PLASMA/VACUUM INTERACE GEOMETRY CUTTING ELEMENT 
             self.Elements[elem].InterfaceApproximation(inter)
@@ -1691,6 +1824,18 @@ class GradShafranovCutFEM:
         return
     
     def CheckInterfaceNormalVectors(self,BOUNDARY):
+        """
+        Checks the orthogonality of the normal vectors to the interface edges for a given boundary.
+
+        This function verifies if the normal vectors at the boundaries (either plasma or vacuum vessel) are orthogonal to 
+        the corresponding interface segments. It checks the dot product between the segment direction vector and the 
+        normal vector, raising an exception if the dot product is not close to zero (indicating non-orthogonality).
+
+        Input:
+            BOUNDARY (str): Specifies the boundary to check. Options are:
+                - 'PLASMAbound' for plasma boundary
+                - 'VACVESbound' for vacuum vessel boundary
+        """
         if BOUNDARY == self.PLASMAbound:
             elements = self.PlasmaBoundElems
         elif BOUNDARY == self.VACVESbound:
@@ -1708,7 +1853,15 @@ class GradShafranovCutFEM:
     ##################### COMPUTE NUMERICAL INTEGRATION QUADRATURES FOR EACH ELEMENT GROUP 
     
     def ComputeIntegrationQuadratures(self):
-        """ ROUTINE WHERE THE INITIAL NUMERICAL INTEGRATION QUADRATURES FOR ALL ELEMENTS IN THE MESH ARE PREPARED. """
+        """
+        Computes the numerical integration quadratures for different types of elements and boundaries.
+
+        The function computes quadrature entities for the following cases:
+            1. Standard 2D quadratures for non-cut elements.
+            2. Adapted quadratures for cut elements.
+            3. Boundary quadratures for elements on the computational domain's boundary (vacuum vessel).
+            4. Quadratures for solenoids in the case of a free-boundary plasma problem.
+        """
         
         # COMPUTE STANDARD 2D QUADRATURE ENTITIES FOR NON-CUT ELEMENTS 
         for elem in self.NonCutElems:
@@ -1727,17 +1880,22 @@ class GradShafranovCutFEM:
         if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
             for SOLENOID in self.SOLENOIDS:
                 SOLENOID.ComputeIntegrationQuadrature(self.QuadratureOrder)
-                
         return
     
     #################### UPDATE EMBEDED METHOD ##############################
     
     def UpdateElements(self):
-        """ FUNCTION WHERE THE DIFFERENT METHOD ENTITIES ARE RECOMPUTED ACCORDING TO THE EVOLUTION OF THE LEVEL-SET DEFINING THE PLASMA REGION. 
-        THEORETICALY, THE ONLY ELEMENTS AFFECTED AND THUS NEED TO RECOMPUTE THEIR ENTITIES AS THE PLASMA REGION EVOLVES SHOULD BE:
-                - PLASMA ELEMENTS
-                - PLASMABOUNDARY ELEMENTS
-                - VACUUM ELEMENTS. """
+        """
+        If necessary, the level-set function is updated according to the new normalised solution's 0-level contour.
+        If the new saddle point is close enough to the old one, the function exits early, assuming the plasma region is already well-defined.
+        
+        On the contrary, it updates the following:
+            1. Plasma boundary level-set function values.
+            2. Plasma region classification.
+            3. Plasma boundary approximation and normal vectors.
+            4. Numerical integration quadratures for the plasma and vacuum elements.
+            5. Updates nodes on the plasma boundary approximation.
+        """
                 
         if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:
             # IN CASE WHERE THE NEW SADDLE POINT (N+1) CORRESPONDS (CLOSE TO) TO THE OLD SADDLE POINT, THEN THAT MEANS THAT THE PLASMA REGION
@@ -1831,7 +1989,7 @@ class GradShafranovCutFEM:
                     
                 self.ClassifyElements()
                 
-                ###### RECOMPUTE PLASMA/VACUUM INTERFACE LINEAR APPROXIMATION and NORMAL VECTORS
+                ###### RECOMPUTE PLASMA/VACUUM INTERFACE APPROXIMATION and NORMAL VECTORS
                 self.ComputePlasmaBoundaryApproximation()
                 
                 ###### RECOMPUTE NUMERICAL INTEGRATION QUADRATURES
@@ -1849,6 +2007,13 @@ class GradShafranovCutFEM:
     #################### L2 ERROR COMPUTATION ############################
     
     def ComputeL2error(self):
+        """
+        Computes the L2 error of the PSI field by integrating the squared difference between the analytical solution and the 
+        computed solution over the plasma region.
+
+        Output:
+            L2error (float): The computed L2 error value, which measures the difference between the analytical and numerical PSI solutions.
+        """
         L2error = 0
         # INTEGRATE OVER PLASMA ELEMENTS
         for elem in self.PlasmaElems:
@@ -1876,8 +2041,7 @@ class GradShafranovCutFEM:
                     for ig in range(SUBELEM.ng):
                         # LOOP OVER ELEMENTAL NODES
                         for i in range(SUBELEM.n):
-                            L2error += (PSIg[ig]-self.PSIAnalyticalSolution(SUBELEM.Xg[ig,:],self.PLASMA_CURRENT))**2*SUBELEM.Ng[ig,i]*SUBELEM.detJg[ig]*SUBELEM.Wg[ig] 
-                            
+                            L2error += (PSIg[ig]-self.PSIAnalyticalSolution(SUBELEM.Xg[ig,:],self.PLASMA_CURRENT))**2*SUBELEM.Ng[ig,i]*SUBELEM.detJg[ig]*SUBELEM.Wg[ig]                  
         return L2error
     
     
@@ -1886,9 +2050,14 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def AssembleGlobalSystem(self):
-        """ This routine assembles the global matrices derived from the discretised linear system of equations used the common Galerkin approximation. 
-        Nonetheless, due to the unfitted nature of the method employed, integration in cut cells (elements containing the interface between plasma region 
-        and vacuum region, defined by the level-set 0-contour) must be treated accurately. """
+        """      
+        Assembles the global matrices (Left-Hand Side and Right-Hand Side) derived from the discretized linear system of equations using the Galerkin approximation.
+
+        The assembly process involves:
+            1. Non-cut elements: Integration over elements not cut by any interface (using standard quadrature).
+            2. Cut elements: Integration over subelements in elements cut by interfaces, using adapted quadratures.
+            3. Boundary elements: For computational domain boundary elements, integration over the vacuum vessel boundary (if applicable).
+        """
         
         # INITIALISE GLOBAL SYSTEM MATRICES
         self.LHS = np.zeros([self.Nn,self.Nn])
@@ -2046,7 +2215,9 @@ class GradShafranovCutFEM:
         return
     
     def SolveSystem(self):
-        # SOLVE LINEAR SYSTEM OF EQUATIONS AND OBTAIN PSI
+        """
+        Solves the linear system of equations to obtain the solution PSI at iteration N+1.
+        """
         if self.PLASMA_BOUNDARY == "FIXE":
             self.PSI = np.zeros([self.Nn,1])
             LHSred, RHSred, plasmaboundnodes, unknownodes = self.StrongBCimposition()
@@ -2060,7 +2231,23 @@ class GradShafranovCutFEM:
         return
     
     def StrongBCimposition(self):
-        # WE STRONGLY IMPOSE ANALYTICAL SOLUTION VALUES ON THE NODES FROM PLASMA BOUNDARY ELEMENTS
+        """
+        Imposes strong boundary conditions on the plasma boundary nodes by modifying the global system.
+
+        This function modifies the Right-Hand Side (RHS) vector and reduces the Left-Hand Side (LHS) matrix based on 
+        the plasma boundary conditions. Specifically, it imposes the analytical solution values at the plasma boundary nodes.
+
+        Steps:
+            1. Identifies the plasma boundary nodes based on the elements in `PlasmaBoundElems`.
+            2. Modifies the RHS by subtracting the contribution of the plasma boundary nodes.
+            3. Reduces the LHS matrix and RHS vector to exclude the plasma boundary nodes and returns the reduced system.
+
+        Output:
+            LHSred (ndarray): The reduced LHS matrix excluding the plasma boundary nodes.
+            RHSred (ndarray): The reduced RHS vector excluding the plasma boundary nodes.
+            plasmaboundnodes (ndarray): List of indices corresponding to the plasma boundary nodes.
+            unknownodes (list): List of indices corresponding to the unknown nodes after imposing the boundary conditions.
+        """
         RHS_temp = self.RHS.copy()
         # 1. FIND PLASMA BOUNDARY NODES
         plasmaboundnodes = set()
@@ -2085,6 +2272,9 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def openOUTPUTfiles(self):
+        """
+        Open files for selected output. 
+        """
         if self.PSI_output:
             self.PSI_file = open(self.outputdir+'/UNKNO.dat', 'w')
             self.PSI_file.write('UNKNOWN_PSIpol_FIELD\n')
@@ -2124,6 +2314,9 @@ class GradShafranovCutFEM:
         return
     
     def closeOUTPUTfiles(self):
+        """
+        Close files for selected output.
+        """
         if self.PSI_output:
             self.PSI_file.write('END_UNKNOWN_PSIpol_FIELD')
             self.PSI_file.close()
@@ -2163,6 +2356,18 @@ class GradShafranovCutFEM:
         return
     
     def copysimfiles(self):
+        """
+        Copies the simulation files (DOM.DAT, GEO.DAT, and EQU.DAT) to the output directory for the given case and mesh.
+
+        This function handles the copying of essential simulation data files from the mesh folder and case file location
+        to the output directory. The files copied include the mesh domain data (`dom.dat`), geometry data (`geo.dat`), and 
+        equilibrium data (`equ.dat`).
+
+        Steps:
+            1. Copies the mesh domain file (`dom.dat`) from the mesh folder to the output directory.
+            2. Copies the geometry file (`geo.dat`) from the mesh folder to the output directory.
+            3. Copies the equilibrium data file (`equ.dat`) from the case file to the output directory.
+        """
         
         # COPY DOM.DAT FILE
         MeshDataFile = self.mesh_folder +'/'+ 'TS-CUTFEM-' + self.MESH +'.dom.dat'
@@ -2177,6 +2382,9 @@ class GradShafranovCutFEM:
         return
     
     def writeparams(self):
+        """
+        Write simulation parameters in output file.
+        """
         if self.PARAMS_output:
             self.PARAMS_file = open(self.outputdir+'/PARAMETERS.dat', 'w')
             self.PARAMS_file.write('SIMULATION_PARAMTERS_FILE\n')
@@ -2373,6 +2581,27 @@ class GradShafranovCutFEM:
     ##################################################################################################
     
     def EQUILI(self):
+        """
+        Main subroutine for solving the Grad-Shafranov boundary value problem (BVP) using the CutFEM method.
+
+        This function orchestrates the entire iterative process for solving the plasma equilibrium problem. It involves:
+            1. Reading input files, including mesh and boundary data.
+            2. Initializing parameters and setting up directories for output.
+            3. Running an outer loop (external loop) that controls the convergence of the overall solution.
+            4. Running an inner loop (internal loop) that solves the system for the plasma current and updates the mesh and solution iteratively.
+            5. Evaluating and checking convergence criteria at each step.
+            6. Writing results at each iteration, including solution values, critical points, and residuals.
+
+        The function also handles:
+            - Copying simulation files,
+            - Plotting the solution when requested,
+            - Checking convergence for both the PSI field and vacuum vessel first wall values,
+            - Updating the plasma boundary and mesh classification, and
+            - Computing and normalizing critical plasma quantities.
+
+        The solution process continues until convergence criteria for both the internal and external loops are satisfied.
+        """
+        
         # READ INPUT FILES
         print("READ INPUT FILES...")
         self.ReadMesh()
@@ -2743,7 +2972,7 @@ class GradShafranovCutFEM:
             axs[i].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors='green',linewidths=6)
             # PLOT VACUUM VESSEL FIRST WALL
             axs[i].tricontour(self.X[:,0],self.X[:,1], self.VacVessWallLevSet, levels=[0], colors='orange',linewidths=6)
-            # PLOT NORMAL LINEAR APPROXIMATION NORMAL VECTORS
+            # PLOT NORMAL VECTORS
             for elem in np.concatenate((self.PlasmaBoundElems,self.VacVessWallElems),axis=0):
                 if i == 0:
                     dl = 5
@@ -2937,7 +3166,7 @@ class GradShafranovCutFEM:
             # PLOT QUADRATURE INTEGRATION POINTS
             plt.scatter(ELEMENT.Xg[:,0],ELEMENT.Xg[:,1],marker='x',c='black')
             
-        # PLOT PLASMA/VACUUM INTERFACE ELEMENTS
+        # PLOT PLASMA BOUNDARY ELEMENTS
         for elem in self.PlasmaBoundElems:
             ELEMENT = self.Elements[elem]
             # PLOT ELEMENT EDGES
@@ -2950,10 +3179,10 @@ class GradShafranovCutFEM:
                     plt.plot([SUBELEM.Xe[i,0], SUBELEM.Xe[(i+1)%SUBELEM.n,0]], [SUBELEM.Xe[i,1], SUBELEM.Xe[(i+1)%SUBELEM.n,1]], color='gold', linewidth=1)
                 # PLOT QUADRATURE INTEGRATION POINTS
                 plt.scatter(SUBELEM.Xg[:,0],SUBELEM.Xg[:,1],marker='x',c='gold')
-            # PLOT INTERFACE LINEAR APPROXIMATION AND INTEGRATION POINTS
+            # PLOT INTERFACE  APPROXIMATION AND INTEGRATION POINTS
             for INTERFACE in range(ELEMENT.InterfApprox):
                 for SEGMENT in INTERFACE.Segments:
-                    # PLOT INTERFACE LINEAR APPROXIMATION
+                    # PLOT INTERFACE APPROXIMATION
                     plt.plot(SEGMENT.Xseg[:,0], SEGMENT.Xseg[:,1], color='green', linewidth=1)
                     # PLOT INTERFACE QUADRATURE
                     plt.scatter(SEGMENT.Xg[:,0],SEGMENT.Xg[:,1],marker='o',c='green')
@@ -2974,10 +3203,10 @@ class GradShafranovCutFEM:
                         plt.plot([SUBELEM.Xe[i,0], SUBELEM.Xe[(i+1)%SUBELEM.n,0]], [SUBELEM.Xe[i,1], SUBELEM.Xe[(i+1)%SUBELEM.n,1]], color='darkturquoise', linewidth=1)
                     # PLOT QUADRATURE INTEGRATION POINTS
                     plt.scatter(SUBELEM.Xg[:,0],SUBELEM.Xg[:,1],marker='x',c='darkturquoise')
-            # PLOT INTERFACE LINEAR APPROXIMATION AND INTEGRATION POINTS
+            # PLOT INTERFACE APPROXIMATION AND INTEGRATION POINTS
             for INTERFACE in range(ELEMENT.InterfApprox):
                 for SEGMENT in INTERFACE.Segments:
-                    # PLOT INTERFACE LINEAR APPROXIMATION
+                    # PLOT INTERFACE APPROXIMATION
                     plt.plot(SEGMENT.Xseg[:,0], SEGMENT.Xseg[:,1], color='orange', linewidth=1)
                     # PLOT INTERFACE QUADRATURE
                     plt.scatter(SEGMENT.Xg[:,0],SEGMENT.Xg[:,1],marker='o',c='orange')

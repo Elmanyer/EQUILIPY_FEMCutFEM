@@ -23,8 +23,20 @@ from src.GaussQuadrature import *
 from src.ShapeFunctions import *
 
 class Coil:
+    """
+    Class representing a tokamak's external coil (confinement magnet).
+    """
     
     def __init__(self,index,dim,X,I):
+        """
+        Constructor to initialize the Coil object with the provided attributes.
+
+        Input:
+            - index (int): The index of the coil in the global system.
+            - dim (int): The spatial dimension of the coil coordinates.
+            - X (numpy.ndarray): A 1D array representing the position coordinates of the coil in physical space.
+            - I (float): The current carried by the coil.
+        """
         
         self.index = index      # COIL INDEX
         self.dim = dim          # SPATIAL DIMENSION
@@ -33,8 +45,20 @@ class Coil:
         return
     
 class Solenoid:
+    """
+    Class representing a tokamak's external solenoid (confinement magnet).
+    """
     
     def __init__(self,index,ElOrder,dim,Xe,I):
+        """
+        Constructor to initialize the Solenoid object with the provided attributes.
+
+        Input:
+            - index (int): The index of the solenoid in the global system.
+            - dim (int): The spatial dimension of the solenoid coordinates.
+            - X (numpy.ndarray): Solenoid nodal coordinates matrix.
+            - I (float): The current carried by the solenoid.
+        """
         
         self.index = index      # SOLENOID INDEX
         self.ElType = 0         # BAR (1D) ELEMENT
@@ -55,6 +79,9 @@ class Solenoid:
         return
     
     def ComputeHOnodes(self):
+        """
+        This method computes the coordinates of the high-order nodes for a linear solenoid element.
+        """
         XeHO = np.zeros([self.n,self.dim])
         XeHO[:2,:] = self.Xe
         dx = np.abs(self.Xe[1,0]-self.Xe[0,0])/(self.n-1)
@@ -66,7 +93,12 @@ class Solenoid:
         return
     
     def ComputeIntegrationQuadrature(self,NumQuadOrder):
+        """
+        This method computes the numerical integration quadratures to integrate along the solenoids (1D integration).
         
+        Input:
+            NumQuadOrder (int): The order of the Gauss quadrature to be used (number of integration points).
+        """
         # COMPUTE 1D NUMERICAL INTEGRATION QUADRATURES TO INTEGRATE ALONG SOLENOIDS
         self.XIg, self.Wg, self.ng = GaussQuadrature(self.ElType,NumQuadOrder)
         # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE 

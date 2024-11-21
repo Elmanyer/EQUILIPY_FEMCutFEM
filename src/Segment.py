@@ -23,8 +23,20 @@
 # embodies the segments contituting the mesh. 
 
 class InterfaceApprox:
+    """
+    Class representing an interface approximation consisting of a collection of segments.
+    This class manages the properties and methods related to the interface, including its 
+    segmentation and nodal coordinates in both physical and reference space.
+    """
     
     def __init__(self,index,Nsegments):
+        """
+        Initializes the interface approximation with the specified global index and number of segments.
+
+        Input:
+            - index (int): Global index of the element in the computational mesh.
+            - Nsegments (int): Number of segments conforming the interface approximation.
+        """
         
         self.index = index            # GLOBAL INDEX OF INTERFACE APPROXIMATION
         self.Nsegments = Nsegments    # NUMBER OF SEGMENTS CONSTITUTING INTERFACE APPROXIMATION
@@ -36,8 +48,23 @@ class InterfaceApprox:
         return
 
 class Segment:
+    """
+    Class representing a segment element in a computational mesh, used for defining interface approximations
+    in a 1D space. Each segment has a set of properties and methods related to its geometry, integration
+    quadrature, and normal vector.
+    """
     
     def __init__(self,index,ElOrder,Xseg):
+        """
+        Initializes the segment element with the given index, element order, and nodal coordinates.
+        
+        Input:
+        ------
+        index (int): Index of the segment element.
+        ElOrder (int): Element order (1 for linear, 2 for quadratic).
+        Xseg (numpy.ndarray): Matrix of nodal coordinates in physical space.
+        
+        """
         
         self.index = index          # SEGMENT INDEX
         self.ElType = 0             # ELEMENT TYPE = 0 ->> BAR ELEMENT
@@ -58,6 +85,7 @@ class Segment:
         self.dNdetag = None         # REFERENCE SHAPE FUNCTIONS DERIVATIVES RESPECT TO ETA EVALUATED AT GAUSS INTEGRATION NODES
         self.detJg = None           # MATRIX DETERMINANTS OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL 
         
+        # NORMAL VECTOR (OUTWARDS RESPECT TO BOUNDARY)
         self.NormalVec = None       # SEGMENT NORMAL VECTOR POINTING OUTWARDS (RESPECT TO INTERFACE)
         return
     
