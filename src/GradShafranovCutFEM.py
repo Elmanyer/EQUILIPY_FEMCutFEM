@@ -38,10 +38,9 @@ from src.Magnet import *
 
 class GradShafranovCutFEM:
     
-    # GENERAL PARAMETERS
+    # PHYSICAL CONSTANTS
     epsilon0 = 8.8542E-12        # F m-1    Magnetic permitivity 
     mu0 = 12.566370E-7           # H m-1    Magnetic permeability
-    K = 1.602E-19                # J eV-1   Botlzmann constant
 
     def __init__(self,MESH,CASE):
         # WORKING DIRECTORY
@@ -162,10 +161,10 @@ class GradShafranovCutFEM:
         self.Nbound = None                  # NUMBER OF COMPUTATIONAL DOMAIN'S BOUNDARIES (NUMBER OF ELEMENTAL EDGES)
         self.Nnbound = None                 # NUMBER OF NODES ON COMPUTATIONAL DOMAIN'S BOUNDARY
         self.BoundaryNodes = None           # LIST OF NODES (GLOBAL INDEXES) ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
-        self.Xmax = None                    # COMPUTATIONAL MESH MAXIMAL X (R) COORDINATE
-        self.Xmin = None                    # COMPUTATIONAL MESH MINIMAL X (R) COORDINATE
-        self.Ymax = None                    # COMPUTATIONAL MESH MAXIMAL Y (Z) COORDINATE
-        self.Ymin = None                    # COMPUTATIONAL MESH MINIMAL Y (Z) COORDINATE
+        self.Rmax = None                    # COMPUTATIONAL MESH MAXIMAL X (R) COORDINATE
+        self.Rmin = None                    # COMPUTATIONAL MESH MINIMAL X (R) COORDINATE
+        self.Zmax = None                    # COMPUTATIONAL MESH MAXIMAL Y (Z) COORDINATE
+        self.Zmin = None                    # COMPUTATIONAL MESH MINIMAL Y (Z) COORDINATE
         self.NnFW = None                    # NUMBER OF NODES ON VACUUM VESSEL FIRST WALL APPROXIMATION
         self.XFW = None                     # COORDINATES MATRIX FOR NODES ON VACCUM VESSEL FIRST WALL APPROXIMATION
         self.NnPB = None                    # NUMBER OF NODES ON PLASMA BOUNDARY APPROXIMATION
@@ -374,10 +373,10 @@ class GradShafranovCutFEM:
         self.Nnbound = len(self.BoundaryNodes)
         
         # OBTAIN COMPUTATIONAL MESH LIMITS
-        self.Xmax = np.max(self.X[:,0])
-        self.Xmin = np.min(self.X[:,0])
-        self.Ymax = np.max(self.X[:,1])
-        self.Ymin = np.min(self.X[:,1])
+        self.Rmax = np.max(self.X[:,0])
+        self.Rmin = np.min(self.X[:,0])
+        self.Zmax = np.max(self.X[:,1])
+        self.Zmin = np.min(self.X[:,1])
         
         print('Done!')
         return
@@ -1283,8 +1282,8 @@ class GradShafranovCutFEM:
         # DEFINE FINER STRUCTURED MESH
         Mr = 60
         Mz = 80
-        rfine = np.linspace(self.Xmin, self.Xmax, Mr)
-        zfine = np.linspace(self.Ymin, self.Ymax, Mz)
+        rfine = np.linspace(self.Rmin, self.Rmax, Mr)
+        zfine = np.linspace(self.Zmin, self.Zmax, Mz)
         # INTERPOLATE PSI VALUES
         Rfine, Zfine = np.meshgrid(rfine,zfine)
         PSIfine = griddata((self.X[:,0],self.X[:,1]), PSI.T[0], (Rfine, Zfine), method='cubic')
@@ -1354,7 +1353,7 @@ class GradShafranovCutFEM:
             print('SADDLE POINT AT ',self.Xcrit[1,1,:-1],' (ELEMENT ', int(self.Xcrit[1,1,-1]),') WITH VALUE PSI_X = ',self.PSI_X)
         
         else:
-            self.Xcrit[1,1,:-1] = [self.Xmin,self.Ymin]
+            self.Xcrit[1,1,:-1] = [self.Rmin,self.Zmin]
             self.PSI_X = 0
             
         return 
@@ -1797,7 +1796,7 @@ class GradShafranovCutFEM:
                 # IDENTIFY COMPUTATIONAL DOMAIN'S BOUNDARIES CONFORMING VACUUM VESSEL FIRST WALL
                 self.Elements[elem].ComputationalDomainBoundaryEdges(self.Tbound)  
                 # COMPUTE OUTWARDS NORMAL VECTOR
-                self.Elements[elem].ComputationalDomainBoundaryNormal(self.Xmax,self.Xmin,self.Ymax,self.Ymin)
+                self.Elements[elem].ComputationalDomainBoundaryNormal(self.Rmax,self.Rmin,self.Zmax,self.Zmin)
         else:
             for inter, elem in enumerate(self.VacVessWallElems):
                 # APPROXIMATE VACUUM VESSEL FIRST WALL GEOMETRY CUTTING ELEMENT 
@@ -1931,7 +1930,7 @@ class GradShafranovCutFEM:
                         containscompudombound = False
                         for point in path.vertices:
                             # CHECK IF CONTOUR CONTAINS COMPUTATIONAL DOMAIN BOUNDARY POINTS
-                            if np.abs(point[0]-self.Xmax) < 0.2 or np.abs(point[0]-self.Xmin) < 0.2 or np.abs(point[1]-self.Ymax) < 0.1 or np.abs(point[1]-self.Ymin) < 0.1:
+                            if np.abs(point[0]-self.Rmax) < 0.2 or np.abs(point[0]-self.Rmin) < 0.2 or np.abs(point[1]-self.Zmax) < 0.1 or np.abs(point[1]-self.Zmin) < 0.1:
                                 containscompudombound = True
                         if containscompudombound:
                             paths.remove(path)
@@ -2710,8 +2709,8 @@ class GradShafranovCutFEM:
     def PlotFIELD(self,FIELD):
         
         fig, axs = plt.subplots(1, 1, figsize=(5,5))
-        axs.set_xlim(self.Xmin,self.Xmax)
-        axs.set_ylim(self.Ymin,self.Ymax)
+        axs.set_xlim(self.Rmin,self.Rmax)
+        axs.set_ylim(self.Zmin,self.Zmax)
         a = axs.tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], FIELD[self.activenodes], levels=30)
         axs.tricontour(self.X[self.activenodes,0],self.X[self.activenodes,1], FIELD[self.activenodes], levels=[0], colors = 'black')
         axs.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
@@ -2733,8 +2732,8 @@ class GradShafranovCutFEM:
             ax.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
             if self.VACUUM_VESSEL == self.FIRST_WALL:
                 ax.tricontour(self.X[:,0],self.X[:,1], self.VacVessWallLevSet, levels=[0], colors = 'orange')
-            ax.set_xlim(self.Xmin, self.Xmax)
-            ax.set_ylim(self.Ymin, self.Ymax)
+            ax.set_xlim(self.Rmin, self.Rmax)
+            ax.set_ylim(self.Zmin, self.Zmax)
             plt.colorbar(a, ax=ax)
             return
         
@@ -2801,8 +2800,8 @@ class GradShafranovCutFEM:
         colorlist = ['#009E73','#D55E00','#CC79A7','#56B4E9']
 
         fig, axs = plt.subplots(1, 2, figsize=(10,6))
-        axs[0].set_xlim(self.Xmin-0.25,self.Xmax+0.25)
-        axs[0].set_ylim(self.Ymin-0.25,self.Ymax+0.25)
+        axs[0].set_xlim(self.Rmin-0.25,self.Rmax+0.25)
+        axs[0].set_ylim(self.Zmin-0.25,self.Zmax+0.25)
         if PSI:
             axs[0].tricontourf(self.X[:,0],self.X[:,1], self.PSI_NORM[:,1], levels=30, cmap='plasma')
             axs[0].tricontour(self.X[:,0],self.X[:,1], self.PSI_NORM[:,1], levels=[0], colors = 'black')
@@ -2867,20 +2866,20 @@ class GradShafranovCutFEM:
     def PlotLevelSetEvolution(self,Zlow,Rleft):
         
         fig, axs = plt.subplots(1, 2, figsize=(10,5))
-        axs[0].set_xlim(self.Xmin,self.Xmax)
-        axs[0].set_ylim(self.Ymin,self.Ymax)
+        axs[0].set_xlim(self.Rmin,self.Rmax)
+        axs[0].set_ylim(self.Zmin,self.Zmax)
         a = axs[0].tricontourf(self.X[:,0],self.X[:,1], self.PSI_NORM[:,1], levels=30)
         axs[0].tricontour(self.X[:,0],self.X[:,1], self.PSI_NORM[:,1], levels=[0], colors = 'black')
         plt.colorbar(a, ax=axs[0])
 
-        axs[1].set_xlim(self.Xmin,self.Xmax)
-        axs[1].set_ylim(self.Ymin,self.Ymax)
+        axs[1].set_xlim(self.Rmin,self.Rmax)
+        axs[1].set_ylim(self.Zmin,self.Zmax)
         a = axs[1].tricontourf(self.X[:,0],self.X[:,1], np.sign(self.PlasmaBoundLevSet), levels=30)
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PSI_NORM[:,1], levels=[0], colors = 'black',linewidths = 3)
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red',linestyles = 'dashed')
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet_ALL[:,self.it-1], levels=[0], colors = 'orange',linestyles = 'dashed')
-        axs[1].plot([self.Xmin,self.Xmax],[Zlow,Zlow],color = 'green')
-        axs[1].plot([Rleft,Rleft],[self.Ymin,self.Ymax],color = 'green')
+        axs[1].plot([self.Rmin,self.Rmax],[Zlow,Zlow],color = 'green')
+        axs[1].plot([Rleft,Rleft],[self.Zmin,self.Zmax],color = 'green')
 
         plt.show()
         
@@ -2903,8 +2902,8 @@ class GradShafranovCutFEM:
     
     def PlotClassifiedElements(self):
         plt.figure(figsize=(5,6))
-        plt.ylim(self.Ymin-0.25,self.Ymax+0.25)
-        plt.xlim(self.Xmin-0.25,self.Xmax+0.25)
+        plt.ylim(self.Zmin-0.25,self.Zmax+0.25)
+        plt.xlim(self.Rmin-0.25,self.Rmax+0.25)
         
         # PLOT PLASMA REGION ELEMENTS
         for elem in self.PlasmaElems:
@@ -2959,8 +2958,8 @@ class GradShafranovCutFEM:
     def PlotNormalVectors(self):
         fig, axs = plt.subplots(1, 2, figsize=(10,5))
         
-        axs[0].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
-        axs[0].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
+        axs[0].set_xlim(self.Rmin-0.5,self.Rmax+0.5)
+        axs[0].set_ylim(self.Zmin-0.5,self.Zmax+0.5)
         axs[1].set_xlim(6,6.4)
         if self.PLASMA_GEOMETRY == self.FIRST_WALL:
             axs[1].set_ylim(2.5,3.5)
@@ -3040,8 +3039,8 @@ class GradShafranovCutFEM:
         ### UPPER ROW SUBPLOTS 
         # LEFT SUBPLOT: CONSTRAINT VALUES ON PSI
         axs[0].set_aspect('equal')
-        axs[0].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
-        axs[0].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
+        axs[0].set_ylim(self.Zmin-0.5,self.Zmax+0.5)
+        axs[0].set_xlim(self.Rmin-0.5,self.Rmax+0.5)
         cmap = plt.get_cmap('jet')
         
         norm = plt.Normalize(np.min([PSI_Bg.min(),PSI_Dg.min()]),np.max([PSI_Bg.max(),PSI_Dg.max()]))
@@ -3052,8 +3051,8 @@ class GradShafranovCutFEM:
 
         # RIGHT SUBPLOT: RESULTING VALUES ON CUTFEM SYSTEM 
         axs[1].set_aspect('equal')
-        axs[1].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
-        axs[1].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
+        axs[1].set_ylim(self.Zmin-0.5,self.Zmax+0.5)
+        axs[1].set_xlim(self.Rmin-0.5,self.Rmax+0.5)
         linecolors_D = cmap(norm(PSI_D))
         linecolors_B = cmap(norm(PSI_B))
         axs[1].scatter(X_D[:,0],X_D[:,1],color = linecolors_D)
@@ -3096,8 +3095,8 @@ class GradShafranovCutFEM:
         fig, axs = plt.subplots(1, 4, figsize=(18,6)) 
         # LEFT SUBPLOT: ANALYTICAL VALUES
         axs[0].set_aspect('equal')
-        axs[0].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
-        axs[0].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
+        axs[0].set_ylim(self.Zmin-0.5,self.Zmax+0.5)
+        axs[0].set_xlim(self.Rmin-0.5,self.Rmax+0.5)
         cmap = plt.get_cmap('jet')
         norm = plt.Normalize(PSI_Dexact.min(),PSI_Dexact.max())
         linecolors_Dexact = cmap(norm(PSI_Dexact))
@@ -3105,23 +3104,23 @@ class GradShafranovCutFEM:
         
         # CENTER SUBPLOT: CONSTRAINT VALUES ON PSI
         axs[1].set_aspect('equal')
-        axs[1].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
-        axs[1].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
+        axs[1].set_ylim(self.Zmin-0.5,self.Zmax+0.5)
+        axs[1].set_xlim(self.Rmin-0.5,self.Rmax+0.5)
         #norm = plt.Normalize(PSI_Dg.min(),PSI_Dg.max())
         linecolors_Dg = cmap(norm(PSI_Dg))
         axs[1].scatter(X_Dg[:,0],X_Dg[:,1],color = linecolors_Dg)
 
         # RIGHT SUBPLOT: RESULTING VALUES ON CUTFEM SYSTEM 
         axs[2].set_aspect('equal')
-        axs[2].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
-        axs[2].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
+        axs[2].set_ylim(self.Zmin-0.5,self.Zmax+0.5)
+        axs[2].set_xlim(self.Rmin-0.5,self.Rmax+0.5)
         linecolors_D = cmap(norm(PSI_D))
         axs[2].scatter(X_D[:,0],X_D[:,1],color = linecolors_D)
         fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap),ax=axs[2])
         
         axs[3].set_aspect('equal')
-        axs[3].set_ylim(self.Ymin-0.5,self.Ymax+0.5)
-        axs[3].set_xlim(self.Xmin-0.5,self.Xmax+0.5)
+        axs[3].set_ylim(self.Zmin-0.5,self.Zmax+0.5)
+        axs[3].set_xlim(self.Rmin-0.5,self.Rmax+0.5)
         norm = plt.Normalize(np.log(error).min(),np.log(error).max())
         linecolors_error = cmap(norm(np.log(error)))
         axs[3].scatter(X_D[:,0],X_D[:,1],color = linecolors_error)
@@ -3135,8 +3134,8 @@ class GradShafranovCutFEM:
     def PlotIntegrationQuadratures(self):
         
         plt.figure(figsize=(9,11))
-        plt.ylim(self.Ymin-0.25,self.Ymax+0.25)
-        plt.xlim(self.Xmin-0.25,self.Xmax+0.25)
+        plt.ylim(self.Zmin-0.25,self.Zmax+0.25)
+        plt.xlim(self.Rmin-0.25,self.Rmax+0.25)
 
         # PLOT NODES
         plt.plot(self.X[:,0],self.X[:,1],'.',color='black')
@@ -3231,22 +3230,22 @@ class GradShafranovCutFEM:
         print(np.linalg.norm(error))
             
         fig, axs = plt.subplots(1, 3, figsize=(16,5))
-        axs[0].set_xlim(self.Xmin,self.Xmax)
-        axs[0].set_ylim(self.Ymin,self.Ymax)
+        axs[0].set_xlim(self.Rmin,self.Rmax)
+        axs[0].set_ylim(self.Zmin,self.Zmax)
         a = axs[0].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], AnaliticalNorm[self.activenodes], levels=30)
         axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         axs[0].tricontour(self.X[self.activenodes,0],self.X[self.activenodes,1], AnaliticalNorm[self.activenodes], levels=[0], colors = 'black')
         plt.colorbar(a, ax=axs[0])
 
-        axs[1].set_xlim(self.Xmin,self.Xmax)
-        axs[1].set_ylim(self.Ymin,self.Ymax)
+        axs[1].set_xlim(self.Rmin,self.Rmax)
+        axs[1].set_ylim(self.Zmin,self.Zmax)
         a = axs[1].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], self.PSI_CONV[self.activenodes], levels=30)
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PSI_CONV, levels=[0], colors = 'black')
         plt.colorbar(a, ax=axs[1])
 
-        axs[2].set_xlim(self.Xmin,self.Xmax)
-        axs[2].set_ylim(self.Ymin,self.Ymax)
+        axs[2].set_xlim(self.Rmin,self.Rmax)
+        axs[2].set_ylim(self.Zmin,self.Zmax)
         a = axs[2].tricontourf(self.X[self.plasmanodes,0],self.X[self.plasmanodes,1], np.log(error), levels=30)
         axs[2].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         plt.colorbar(a, ax=axs[2])

@@ -538,21 +538,22 @@ class Element:
 
 
     def ReferenceElementTessellation(self):
-        """ This function performs the TESSELLATION of a HIGH-ORDER REFERENCE ELEMENT with interface nodal coordinates XIeintHO
+        """ 
+        This function performs the TESSELLATION of a HIGH-ORDER REFERENCE ELEMENT with interface nodal coordinates XIeintHO
         
-            Output: XIeTESSHO: High-order subelemental nodal coordinates matrix for each child element generated in the tessellation,
-                               such that:
-                                            XIeTESSHO = [[[ xi00, eta00 ],
-                                                          [ xi01, eta01 ],      NODAL COORDINATE MATRIX
-                                                                ....    ],         FOR SUBELEMENT 0
-                                                          [ xi0n, eta0n ]],
-                                                          
-                                                         [[ xi10, eta10 ],
-                                                          [ xi11, eta11 ],      NODAL COORDINATE MATRIX
-                                                                ....    ],         FOR SUBELEMENT 1
-                                                          [ xi1n, eta1n ]],
-                                                          
-                                                                ....    ]
+        Output: XIeTESSHO: High-order subelemental nodal coordinates matrix for each child element generated in the tessellation,
+                            such that:
+                                        XIeTESSHO = [[[ xi00, eta00 ],
+                                                        [ xi01, eta01 ],      NODAL COORDINATE MATRIX
+                                                            ....    ],         FOR SUBELEMENT 0
+                                                        [ xi0n, eta0n ]],
+                                                        
+                                                        [[ xi10, eta10 ],
+                                                        [ xi11, eta11 ],      NODAL COORDINATE MATRIX
+                                                            ....    ],         FOR SUBELEMENT 1
+                                                        [ xi1n, eta1n ]],
+                                                        
+                                                            ....    ]
         """
         # FIRST WE NEED TO DETERMINE WHICH IS THE VERTEX COMMON TO BOTH EDGES INTERSECTING WITH THE INTERFACE
         # AND ORGANISE THE NODAL MATRIX ACCORDINGLY SO THAT
