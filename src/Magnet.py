@@ -21,6 +21,7 @@
 
 from src.GaussQuadrature import *
 from src.ShapeFunctions import *
+from src.Greens import *
 
 class Coil:
     """
@@ -44,12 +45,33 @@ class Coil:
         self.I = I              # COIL CURRENT
         return
     
+    
+    def Br(self,X):
+        """
+        Calculate radial magnetic field Br at X=(R,Z)
+        """
+        return GreensBr(self.X,X) * self.I
+
+    def Bz(self,X):
+        """
+        Calculate vertical magnetic field Bz at X=(R,Z)
+        """
+        return GreensBz(self.X,X) * self.I
+
+    def Psi(self,X):
+        """
+        Calculate poloidal flux psi at X=(R,Z) due to coil
+        """
+        return GreensFunction(self.X,X) * self.I
+    
+    
+    
 class Solenoid:
     """
     Class representing a tokamak's external solenoid (confinement magnet).
     """
     
-    def __init__(self,index,ElOrder,dim,Xe,I):
+    def __init__(self,index,dim,Xe,I,Nturns):
         """
         Constructor to initialize the Solenoid object with the provided attributes.
 
@@ -61,12 +83,10 @@ class Solenoid:
         """
         
         self.index = index      # SOLENOID INDEX
-        self.ElType = 0         # BAR (1D) ELEMENT
-        self.ElOrder = ElOrder  # SOLENOID ELEMENTAL ORDER
-        self.n = ElOrder + 1    # SOLENOID ELEMENT NUMBER OF NODES
         self.dim = dim          # SPATIAL DIMENSION
         self.Xe = Xe            # SOLENOID POSITION COORDINATES MATRIX
         self.I = I              # SOLENOID CURRENT
+        self.Nturns = Nturns    # SOLENOID NUMBER OF TURNS
         
         # NUMERICAL INTEGRATION QUADRATURE
         self.ng = None          # NUMBER OF GAUSS INTEGRATION NODES FOR STANDARD 1D QUADRATURE
@@ -78,35 +98,47 @@ class Solenoid:
         self.detJg = None       # DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL SOLENOID
         return
     
-    def ComputeHOnodes(self):
+    def Solenoid_coils(self):
         """
-        This method computes the coordinates of the high-order nodes for a linear solenoid element.
+        Calculate the position of the individual coils constituting the solenoid.
         """
-        XeHO = np.zeros([self.n,self.dim])
-        XeHO[:2,:] = self.Xe
-        dx = np.abs(self.Xe[1,0]-self.Xe[0,0])/(self.n-1)
-        dy = np.abs(self.Xe[1,1]-self.Xe[0,1])/(self.n-1)
-        for iinnernode in range(2,self.n):
-            XeHO[iinnernode,:] = [self.Xe[0,0]+(iinnernode-1)*dx,
-                                 self.Xe[0,1]+(iinnernode-1)*dy]
-        self.Xe = XeHO
-        return
+        Xcoils = np.zeros([self.Nturns,self.dim])
+        Xcoils[0,:] = self.Xe[0,:]
+        Xcoils[-1,:] = self.Xe[1,:]
+        dr = (self.Xe[1,0]-self.Xe[0,0])/(self.Nturns-1)
+        dz = (self.Xe[1,1]-self.Xe[0,1])/(self.Nturns-1)
+        for icoil in range(1,self.Nturns):
+            Xcoils[icoil,:] = [self.Xe[0,0]+dr*icoil, 
+                               self.Xe[0,1]+dz*icoil]
+        return Xcoils
     
-    def ComputeIntegrationQuadrature(self,NumQuadOrder):
+    def Psi(self,X):
         """
-        This method computes the numerical integration quadratures to integrate along the solenoids (1D integration).
-        
-        Input:
-            NumQuadOrder (int): The order of the Gauss quadrature to be used (number of integration points).
+        Calculate poloidal flux psi at (R,Z) due to solenoid
         """
-        # COMPUTE 1D NUMERICAL INTEGRATION QUADRATURES TO INTEGRATE ALONG SOLENOIDS
-        self.XIg, self.Wg, self.ng = GaussQuadrature(self.ElType,NumQuadOrder)
-        # EVALUATE THE REFERENCE SHAPE FUNCTIONS ON THE STANDARD REFERENCE QUADRATURE 
-        self.Ng, self.dNdxig, foo = EvaluateReferenceShapeFunctions(self.XIg, self.ElType, self.ElOrder)
-        # MAP THE GAUSS INTEGRATION NODES TO PHYSICAL SPACE
-        self.Xg = self.Ng@self.Xe
-        # COMPUTE DETERMINANT OF JACOBIAN OF TRANSFORMATION FROM 1D REFERENCE ELEMENT TO 2D PHYSICAL SOLENOID 
-        self.detJg = np.zeros([self.ng])
-        for ig in range(self.ng):
-            self.detJg[ig] = Jacobian1D(self.Xe,self.dNdxig[ig,:])
-        return
+        Psi_sole = 0.0
+        Xcoils = self.Solenoid_coils()
+        for icoil in range(self.Nturns):
+            Psi_sole += GreensFunction(Xcoils[icoil,:],X) * self.I
+        return Psi_sole
+
+    def Br(self,X):
+        """
+        Calculate radial magnetic field Br at (R,Z) due to solenoid
+        """
+        Br_sole = 0.0
+        Xcoils = self.Solenoid_coils()
+        for icoil in range(self.Nturns):
+            Br_sole += GreensBr(Xcoils[icoil,:],X) * self.I
+        return Br_sole
+
+    def Bz(self,X):
+        """
+        Calculate vertical magnetic field Bz at (R,Z) due to solenoid
+        """
+        Bz_sole = 0.0
+        Xcoils = self.Solenoid_coils()
+        for icoil in range(self.Nturns):
+            Bz_sole += GreensBz(Xcoils[icoil,:],X) * self.I
+        return Bz_sole
+

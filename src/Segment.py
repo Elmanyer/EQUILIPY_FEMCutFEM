@@ -54,7 +54,7 @@ class Segment:
     quadrature, and normal vector.
     """
     
-    def __init__(self,index,ElOrder,Xseg):
+    def __init__(self,index,ElOrder,Tseg,Xseg,XIseg):
         """
         Initializes the segment element with the given index, element order, and nodal coordinates.
         
@@ -71,8 +71,9 @@ class Segment:
         self.ElOrder = ElOrder      # ELEMENT ORDER -> 1: LINEAR ELEMENT  ;  2: QUADRATIC
         self.dim = len(Xseg[0,:])   # SPATIAL DIMENSION
         self.n = ElOrder+1          # NUMBER OF NODES ON SEGMENT (1D ELEMENT)
+        self.Tseg = Tseg            # CONECTIVITY MATRIX RESPECT TO ELEMENTAL LOCAL INDEXES
         self.Xseg = Xseg            # ELEMENTAL NODAL COORDINATES MATRIX (PHYSICAL SPACE)
-        self.XIseg = None           # ELEMENTAL NODAL COORDINATES MATRIX (REFERENCE SPACE) 
+        self.XIseg = XIseg          # ELEMENTAL NODAL COORDINATES MATRIX (REFERENCE SPACE) 
         self.PSIgseg = None         # PSI VALUE ON SEGMENT GAUSS INTEGRATION NODES
         
         # QUADRATURE FOR INTEGRATION ALONG INTERFACE 

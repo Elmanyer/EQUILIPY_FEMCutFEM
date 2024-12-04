@@ -39,53 +39,58 @@ $$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
    N_COILS:              6
    Rposi:   3.9431
    Zposi:   7.5741    
-   Inten:   57300.0e4
+   Inten:   573.0e6
 
    Rposi:   8.2851
    Zposi:   6.5398   
-   Inten:   -28800.0e4
+   Inten:   -288.0e6
 
    Rposi:   11.9919
    Zposi:   3.2752  
-   Inten:   -58100.0e4
+   Inten:   -581.0e6
 
    Rposi:   11.9630
    Zposi:   -2.2336  
-   Inten:   -47800.0e4
+   Inten:   -478.0e6
 
    Rposi:   8.3908
    Zposi:   -6.7269  
-   Inten:   -78100.0e4
+   Inten:   -781.0e6
 
    Rposi:   4.3340
    Zposi:   -7.4665  
-   Inten:   169400.0e4
+   Inten:   1694.0e6
 
    N_SOLENOIDS:          5
    Rposi:   1.696
-   Zlowe:    -5.415
-   Zuppe:     -3.6067
-   Inten:   53000.0e4
+   Zlowe:   -5.415
+   Zuppe:   -3.6067
+   Nturn:   100
+   Inten:   5.3e6
 
    Rposi:   1.696
-   Zlowe:    -3.6067
-   Zuppe:     -1.7983
-   Inten:   -103000.0e4
+   Zlowe:   -3.6067
+   Zuppe:   -1.7983
+   Nturn:   100
+   Inten:   -10.3e6
 
    Rposi:   1.696
-   Zlowe:    -1.7983
-   Zuppe:     1.8183
-   Inten:   -416000.0e4
+   Zlowe:   -1.7983
+   Zuppe:   1.8183
+   Nturn:   100
+   Inten:   -41.6e6
 
    Rposi:   1.696
-   Zlowe:    1.8183
-   Zuppe:     3.6267
-   Inten:   -40500.0e4
+   Zlowe:   1.8183
+   Zuppe:   3.6267
+   Nturn:   100
+   Inten:   -4.05e6
 
    Rposi:   1.696
-   Zlowe:    3.6267
-   Zuppe:     5.435
-   Inten:   -48200.0e4
+   Zlowe:   3.6267
+   Zuppe:   5.435
+   Nturn:   100
+   Inten:   -4.82e6
                                                   
 END_PHYSICAL_PROBLEM                                                                  
 $------------------------------------------------------------                         
@@ -96,6 +101,7 @@ NUMERICAL_TREATMENT
   INT_ITER:          10        $ INTERNAL LOOP (PHI_NORM) MAXIMUM ITERATIONS
   INT_TOL:           1.0e-5    $ INTERNAL LOOP (PHI_NORM) CONVERGENCE TOLERANCE
   BETA_equ:          1.0e8     $ NITSCHE'S METHOD PENALTY PARAMETER
+  ZETA_equ:          1.0e5     $ GHOST PENALTY PARAMETER
   RELAXATION:        1.0       $ AIKITEN'S METHOD RELAXATION PARAMETER
   EXTR_R0:           6.0       $ MAGNETIC AXIS OPTIMIZATION ROUTINE INITIAL GUESS R COORDINATE
   EXTR_Z0:           0.0       $ MAGNETIC AXIS OPTIMIZATION ROUTINE INITIAL GUESS Z COORDINATE

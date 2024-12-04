@@ -367,16 +367,16 @@ def EvaluateReferenceShapeFunctions(X, elemType, elemOrder):
     n, foo = ElementalNumberOfNodes(elemType, elemOrder)
     ## NUMBER OF GAUSS INTEGRATION NODES
     if elemType == 0:
-        Ng = len(X)
+        ng = len(X)
     else: 
-        Ng = len(X[:,0])
+        ng = len(X[:,0])
         
-    N = np.zeros([Ng,n])
-    dNdxi = np.zeros([Ng,n])
-    dNdeta = np.zeros([Ng,n])
+    N = np.zeros([ng,n])
+    dNdxi = np.zeros([ng,n])
+    dNdeta = np.zeros([ng,n])
     
     for i in range(n):
-        for ig in range(Ng):
+        for ig in range(ng):
             N[ig,i], dNdxi[ig,i], dNdeta[ig,i] = ShapeFunctionsReference(X[ig,:],elemType, elemOrder, i+1)
             
     return N, dNdxi, dNdeta
