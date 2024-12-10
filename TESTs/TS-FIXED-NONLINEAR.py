@@ -28,7 +28,7 @@
 import sys
 sys.path.append('../')
 
-from src.GradShafranovCutFEM import *
+from GradShafranovFEMCutFEM import *
 
 ### SELECT MESH 
 MESH = 'TS-CUTFEM-TRI03-FINE-REDUCED'
@@ -43,7 +43,7 @@ CASE = 'TS-FIXED-1W-NONLINEAR'
 ##############################################################
 
 ## CREATE GRAD-SHAFRANOV PROBLEM 
-Problem = GradShafranovCutFEM(MESH,CASE)
+Problem = GradShafranovFEMCutFEM(MESH,CASE)
 ## DECLARE OUTPUT SWITCHS:
 ##### OUTPUT PLOTS IN RUNTIME
 Problem.plotElemsClassi_output = False        # OUTPUT SWITCH FOR ELEMENTS CLASSIFICATION PLOTS AT EACH ITERATION
