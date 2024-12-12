@@ -37,58 +37,58 @@ $$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
    N_COILS:              6
    Rposi:   3.9431
    Zposi:   7.5741    
-   Inten:   5.73e6
+   Inten:   5.73e7
 
    Rposi:   8.2851
    Zposi:   6.5398   
-   Inten:   -2.88e6
+   Inten:   -2.88e7
 
    Rposi:   11.9919
    Zposi:   3.2752  
-   Inten:   -5.81e6
+   Inten:   -5.81e7
 
    Rposi:   11.9630
    Zposi:   -2.2336  
-   Inten:   -4.78e6
+   Inten:   -4.78e7
 
    Rposi:   8.3908
    Zposi:   -6.7269  
-   Inten:   -7.81e6
+   Inten:   -7.81e7
 
    Rposi:   4.3340
    Zposi:   -7.4665  
-   Inten:   16.94e6
+   Inten:   16.94e7
 
    N_SOLENOIDS:          5
    Rposi:   1.696
    Zlowe:   -5.415
    Zuppe:   -3.6067
    Nturn:   100
-   Inten:   5.3e4
+   Inten:   5.3e5
 
    Rposi:   1.696
    Zlowe:   -3.6067
    Zuppe:   -1.7983
    Nturn:   100
-   Inten:   -10.3e4
+   Inten:   -10.3e5
 
    Rposi:   1.696
    Zlowe:   -1.7983
    Zuppe:   1.8183
    Nturn:   100
-   Inten:   -41.6e4
+   Inten:   -41.6e5
 
    Rposi:   1.696
    Zlowe:   1.8183
    Zuppe:   3.6267
    Nturn:   100
-   Inten:   -4.05e4
+   Inten:   -4.05e5
 
    Rposi:   1.696
    Zlowe:   3.6267
    Zuppe:   5.435
    Nturn:   100
-   Inten:   -4.82e4
+   Inten:   -4.82e5
                                                   
 END_PHYSICAL_PROBLEM                                                                  
 $------------------------------------------------------------                         
@@ -99,12 +99,12 @@ NUMERICAL_TREATMENT
   INT_ITER:          10        $ INTERNAL LOOP (PHI_NORM) MAXIMUM ITERATIONS
   INT_TOL:           1.0e-5    $ INTERNAL LOOP (PHI_NORM) CONVERGENCE TOLERANCE
   BETA_equ:          1.0e5     $ NITSCHE'S METHOD PENALTY PARAMETER
-  ZETA_equ:          1.0e3     $ GHOST PENALTY PARAMETER
+  ZETA_equ:          1.0e4     $ GHOST PENALTY PARAMETER
   RELAXATION:        1.0       $ AIKITEN'S METHOD RELAXATION PARAMETER
   EXTR_R0:           6.0       $ MAGNETIC AXIS OPTIMIZATION ROUTINE INITIAL GUESS R COORDINATE
   EXTR_Z0:           0.0       $ MAGNETIC AXIS OPTIMIZATION ROUTINE INITIAL GUESS Z COORDINATE
-  SADD_R0:           4.0       $ ACTIVE SADDLE POINT OPTIMIZATION ROUTINE INITIAL GUESS R COORDINATE
-  SADD_Z0:          -4.0       $ ACTIVE SADDLE POINT OPTIMIZATION ROUTINE INITIAL GUESS Z COORDINATE
+  SADD_R0:           5.0       $ ACTIVE SADDLE POINT OPTIMIZATION ROUTINE INITIAL GUESS R COORDINATE
+  SADD_Z0:          -3.0       $ ACTIVE SADDLE POINT OPTIMIZATION ROUTINE INITIAL GUESS Z COORDINATE
   OPTI_ITMAX:        50        $ CRITICAL POINTS OPTIMIZATION ALGORITHM MAXIMAL ITERATIONS NUMBER
   OPTI_TOL:          1.0e-6    $ CRITICAL POINTS OPTIMIZATION ALGORITHM SOLUTION TOLERANCE
                                
