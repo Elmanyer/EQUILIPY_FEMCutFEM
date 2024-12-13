@@ -37,58 +37,58 @@ $$ PARAMETERS FOR EXTERNAL COILS AND SOLENOIDS (MAGNETS)
    N_COILS:              6
    Rposi:   3.9431
    Zposi:   7.5741    
-   Inten:   5.73e7
+   Inten:   5.73e9
 
    Rposi:   8.2851
    Zposi:   6.5398   
-   Inten:   -2.88e7
+   Inten:   -2.88e9
 
    Rposi:   11.9919
    Zposi:   3.2752  
-   Inten:   -5.81e7
+   Inten:   -5.81e9
 
    Rposi:   11.9630
    Zposi:   -2.2336  
-   Inten:   -4.78e7
+   Inten:   -4.78e9
 
    Rposi:   8.3908
    Zposi:   -6.7269  
-   Inten:   -7.81e7
+   Inten:   -7.81e9
 
    Rposi:   4.3340
    Zposi:   -7.4665  
-   Inten:   16.94e7
+   Inten:   16.94e9
 
    N_SOLENOIDS:          5
    Rposi:   1.696
    Zlowe:   -5.415
    Zuppe:   -3.6067
-   Nturn:   100
-   Inten:   5.3e5
+   Nturn:   1000
+   Inten:   5.3e6
 
    Rposi:   1.696
    Zlowe:   -3.6067
    Zuppe:   -1.7983
-   Nturn:   100
-   Inten:   -10.3e5
+   Nturn:   1000
+   Inten:   -10.3e6
 
    Rposi:   1.696
    Zlowe:   -1.7983
    Zuppe:   1.8183
-   Nturn:   100
-   Inten:   -41.6e5
+   Nturn:   1000
+   Inten:   -41.6e6
 
    Rposi:   1.696
    Zlowe:   1.8183
    Zuppe:   3.6267
-   Nturn:   100
-   Inten:   -4.05e5
+   Nturn:   1000
+   Inten:   -4.05e6
 
    Rposi:   1.696
    Zlowe:   3.6267
    Zuppe:   5.435
-   Nturn:   100
-   Inten:   -4.82e5
+   Nturn:   1000
+   Inten:   -4.82e6
                                                   
 END_PHYSICAL_PROBLEM                                                                  
 $------------------------------------------------------------                         

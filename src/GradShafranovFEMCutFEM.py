@@ -157,8 +157,10 @@ class GradShafranovFEMCutFEM:
         self.Nbound = None                  # NUMBER OF COMPUTATIONAL DOMAIN'S BOUNDARIES (NUMBER OF ELEMENTAL EDGES)
         self.Nnbound = None                 # NUMBER OF NODES ON COMPUTATIONAL DOMAIN'S BOUNDARY
         self.BoundaryNodes = None           # LIST OF NODES (GLOBAL INDEXES) ON THE COMPUTATIONAL DOMAIN'S BOUNDARY
-        self.DOFNodes = None
-        self.NnDOF = None
+        self.DOFNodes = None                # LIST OF NODES (GLOBAL INDEXES) CORRESPONDING TO UNKNOW DEGREES OF FREEDOM IN THE CUTFEM SYSTEM
+        self.NnDOF = None                   # NUMBER OF UNKNOWN DEGREES OF FREEDOM NODES
+        self.PlasmaNodes = None             # LIST OF NODES (GLOBAL INDEXES) INSIDE THE PLASMA DOMAIN
+        self.VacuumNodes = None             # LIST OF NODES (GLOBAL INDEXES) IN THE VACUUM REGION
         self.NnPB = None                    # NUMBER OF NODES ON PLASMA BOUNDARY APPROXIMATION
         self.Rmax = None                    # COMPUTATIONAL MESH MAXIMAL X (R) COORDINATE
         self.Rmin = None                    # COMPUTATIONAL MESH MINIMAL X (R) COORDINATE
@@ -216,7 +218,6 @@ class GradShafranovFEMCutFEM:
         self.coeffsNONLINEAR = [1.15*np.pi, 1.15, -0.5]  # [Kr, Kz, R0] 
         self.coeffsZHENG = None
         
-        self.activenodes = None
         self.L2error = None
         
         return
@@ -1122,6 +1123,9 @@ class GradShafranovFEMCutFEM:
         
         # GATHER NON-CUT ELEMENTS  
         self.NonCutElems = np.concatenate((self.PlasmaElems, self.VacuumElems, self.VacVessWallElems), axis=0)
+        
+        # CLASSIFY NODES ACCORDING TO NEW ELEMENT CLASSIFICATION
+        self.ClassifyNodes()
         return
     
     def ObtainClassification(self):
@@ -1139,6 +1143,42 @@ class GradShafranovFEMCutFEM:
             Classification[ielem] = +2
             
         return Classification
+    
+    
+    def ClassifyNodes(self):
+        self.PlasmaNodes = set()
+        self.VacuumNodes = set()
+        for ielem in self.PlasmaElems:
+            for node in self.T[ielem,:]:
+                self.PlasmaNodes.add(node) 
+        for ielem in self.VacuumElems:
+            for node in self.T[ielem,:]:
+                self.VacuumNodes.add(node)    
+        for ielem in self.PlasmaBoundElems:
+            for node in self.T[ielem,:]:
+                if self.PlasmaBoundLevSet[node] < 0:
+                    self.PlasmaNodes.add(node)
+                else:
+                    self.VacuumNodes.add(node)
+        for ielem in self.VacVessWallElems:
+            for node in self.T[ielem,:]:
+                self.VacuumNodes.add(node)
+        for node in self.BoundaryNodes:
+            self.VacuumNodes.remove(node)   
+        
+        self.PlasmaNodes = np.array(sorted(list(self.PlasmaNodes)))
+        self.VacuumNodes = np.array(sorted(list(self.VacuumNodes)))
+        return
+    
+    def ComputePlasmaBoundaryNumberNodes(self):
+        """
+        Computes the total number of nodes located on the plasma boundary approximation
+        """  
+        nnodes = 0
+        for ielem in self.PlasmaBoundElems:
+            for SEGMENT in self.Elements[ielem].InterfApprox.Segments:
+                nnodes += SEGMENT.ng
+        return nnodes
     
     
     def IdentifyPlasmaBoundaryGhostFaces(self):
@@ -1260,6 +1300,19 @@ class GradShafranovFEMCutFEM:
                         inside = not inside
                 if inside:
                     return elem
+                
+    def funcPSI(self,X):
+        """ Interpolates PSI value at point X. """
+        elem = self.SearchElement(X,range(self.Ne))
+        psi = self.Elements[elem].ElementalInterpolationPHYSICAL(X,self.PSI[self.Elements[elem].Te])
+        return psi
+    
+    
+    def gradPSI(self,X):
+        """ Interpolates PSI gradient at point X. """
+        elem = self.SearchElement(X,range(self.Ne))
+        gradpsi = self.Elements[elem].GRADElementalInterpolationPHYSICAL(X,self.PSI[self.Elements[elem].Te])
+        return gradpsi
     
     
     def ComputeCriticalPSI(self,PSI):
@@ -1299,22 +1352,29 @@ class GradShafranovFEMCutFEM:
             
         # 1. INTERPOLATE PSI VALUES ON A FINER STRUCTURED MESH USING PSI ON NODES
         # DEFINE FINER STRUCTURED MESH
-        Mr = 60
-        Mz = 80
+        Mr = 75
+        Mz = 105
         rfine = np.linspace(self.Rmin, self.Rmax, Mr)
         zfine = np.linspace(self.Zmin, self.Zmax, Mz)
         # INTERPOLATE PSI VALUES
         Rfine, Zfine = np.meshgrid(rfine,zfine)
         PSIfine = griddata((self.X[:,0],self.X[:,1]), PSI.T[0], (Rfine, Zfine), method='cubic')
+        # CORRECT VALUES AT INTRPOLATION POINTS OUTSIDE OF COMPUTATIONAL DOMAIN
+        for ir in range(Mr):
+            for iz in range(Mz):
+                if np.isnan(PSIfine[iz,ir]):
+                    PSIfine[iz,ir] = 0
         
         # 2. DEFINE GRAD(PSI) WITH FINER MESH VALUES USING FINITE DIFFERENCES
-        dr = (rfine[-1]-rfine[0])/Mr
-        dz = (zfine[-1]-zfine[0])/Mz
+        dr = (self.Rmax-self.Rmin)/Mr
+        dz = (self.Zmax-self.Zmin)/Mz
         gradPSIfine = np.gradient(PSIfine,dr,dz)
         
         # FIND SOLUTION OF  GRAD(PSI) = 0   NEAR MAGNETIC AXIS AND SADDLE POINT 
         if self.it == 1:
             self.Xcrit = np.zeros([2,2,3])  # [(iterations n, n+1), (extremum, saddle point), (R_crit,Z_crit,elem_crit)]
+            #X0_extr = np.array([6,0])
+            #X0_saddle = np.array([5,-4])
             X0_extr = np.array([self.EXTR_R0,self.EXTR_Z0],dtype=float)
             X0_saddle = np.array([self.SADD_R0,self.SADD_Z0],dtype=float)
         else:
@@ -1362,14 +1422,8 @@ class GradShafranovFEMCutFEM:
                 elem = self.SearchElement(self.Xcrit[1,1,:-1],np.concatenate((self.VacuumElems,self.PlasmaBoundElems,self.PlasmaElems),axis=0))
                 self.Xcrit[1,1,-1] = elem
             else:
-                if self.it == 1:
-                    print("SADDLE POINT NOT FOUND. TAKING SOLUTION AT INITIAL GUESS")
-                    elem = self.SearchElement(X0_saddle,np.concatenate((self.PlasmaElems,self.PlasmaBoundElems,self.VacuumElems), axis=0))
-                    self.Xcrit[1,1,:-1] = X0_saddle
-                    self.Xcrit[1,1,-1] = elem
-                else:
-                    print("SADDLE POINT NOT FOUND. TAKING PREVIOUS SOLUTION")
-                    self.Xcrit[1,1,:] = self.Xcrit[0,1,:]
+                print("SADDLE POINT NOT FOUND. TAKING PREVIOUS SOLUTION")
+                self.Xcrit[1,1,:] = self.Xcrit[0,1,:]
                 
             # INTERPOLATE PSI VALUE ON CRITICAL POINT
             self.PSI_X = self.Elements[int(self.Xcrit[1,1,-1])].ElementalInterpolationPHYSICAL(self.Xcrit[1,1,:-1],PSI[self.Elements[int(self.Xcrit[1,1,-1])].Te]) 
@@ -1564,42 +1618,6 @@ class GradShafranovFEMCutFEM:
                         for i in range(SUBELEM.n):
                             integral += fun(SUBELEM.Xg[ig,:],PSIg[ig])*SUBELEM.Ng[ig,i]*SUBELEM.detJg[ig]*SUBELEM.Wg[ig]            
         return integral
-    
-    def ComputeActiveNodes(self):
-        """
-        Computes the active nodes based on the plasma boundary conditions.
-            - If the plasma boundary is fixed, it includes all nodes in the plasma-boundary and plasma elements.
-            - If the plasma boundary is free, it considers all nodes in the domain.
-        """
-        if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY:
-            plasma_elems = np.concatenate((self.PlasmaBoundElems,self.PlasmaElems), axis=0)
-            self.activenodes = set()
-            for ielem in plasma_elems:
-                for node in self.T[ielem,:]:
-                    self.activenodes.add(node)
-            self.activenodes = np.array(list(self.activenodes))
-        else:
-            self.activenodes = range(self.Nn)
-        return
-    
-    def ComputePlasmaNodes(self):
-        self.plasmanodes = set()
-        for ielem in self.PlasmaElems:
-            for node in self.T[ielem,:]:
-                self.plasmanodes .add(node)
-        self.plasmanodes = np.array(list(self.plasmanodes))
-        
-        return
-    
-    def ComputePlasmaBoundaryNumberNodes(self):
-        """
-        Computes the total number of nodes located on the plasma boundary approximation
-        """  
-        nnodes = 0
-        for ielem in self.PlasmaBoundElems:
-            for SEGMENT in self.Elements[ielem].InterfApprox.Segments:
-                nnodes += SEGMENT.ng
-        return nnodes
         
     
     ##################### INITIALISATION 
@@ -1763,8 +1781,6 @@ class GradShafranovFEMCutFEM:
         self.ClassifyElements()
         self.writeElementsClassification()
         print("Done!")
-        
-        self.ComputeActiveNodes()
 
         # COMPUTE PLASMA BOUNDARY APPROXIMATION
         print("     -> APPROXIMATE PLASMA BOUNDARY INTERFACE...", end="")
@@ -2386,6 +2402,27 @@ class GradShafranovFEMCutFEM:
             return Br, Bz
     
     
+    def ComputGradientPSIfield(self):
+        
+        PSIgrad = np.zeros([3*self.Ne,self.dim])
+        Xgrad = np.zeros([3*self.Ne,self.dim])
+        XIgrad = np.array([[1/3,1/3],
+                        [1/3,2/3],
+                        [2/3,1/3]])
+        k = 0
+        for ELEM in self.Elements:
+            for XI in XIgrad:
+                # COMPUTE ELEMENTAL PHYSICAL POINTS WHERE GRADIENT IS EVALUATED
+                X = ELEM.Mapping(XI.reshape([1,2]))
+                Xgrad[k,:] = X
+                # INTERPOLATE PSI GRADIENT
+                PSIgrad[k,:] += ELEM.GRADElementalInterpolationREFERENCE(XI,self.PSI[ELEM.Te])
+                k += 1
+
+        # COMPUTE NORM
+        modPSIgrad = np.sqrt(PSIgrad[:,0]**2+PSIgrad[:,1]**2)
+        return PSIgrad, modPSIgrad
+    
     ##################################################################################################
     ############################################# OUTPUT #############################################
     ##################################################################################################
@@ -2819,13 +2856,13 @@ class GradShafranovFEMCutFEM:
     ############################### RENDERING AND REPRESENTATION #####################################
     ##################################################################################################
     
-    def PlotFIELD(self,FIELD):
+    def PlotFIELD(self,FIELD,plotnodes):
         
         fig, axs = plt.subplots(1, 1, figsize=(5,5))
         axs.set_xlim(self.Rmin,self.Rmax)
         axs.set_ylim(self.Zmin,self.Zmax)
-        a = axs.tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], FIELD[self.activenodes], levels=30)
-        axs.tricontour(self.X[self.activenodes,0],self.X[self.activenodes,1], FIELD[self.activenodes], levels=[0], colors = 'black')
+        a = axs.tricontourf(self.X[plotnodes,0],self.X[plotnodes,1], FIELD[plotnodes], levels=30)
+        axs.tricontour(self.X[plotnodes,0],self.X[plotnodes,1], FIELD[plotnodes], levels=[0], colors = 'black')
         axs.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         plt.colorbar(a, ax=axs)
         plt.show()
@@ -2838,7 +2875,7 @@ class GradShafranovFEMCutFEM:
         AND PSI_NORM IF NORMALISED. """
         
         def subplotfield(self,ax,field):
-            a = ax.tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], field[self.activenodes], levels=50)
+            a = ax.tricontourf(self.X[:,0],self.X[:,1], field, levels=50)
             ax.tricontour(self.X[:,0],self.X[:,1], field, levels=[0], colors = 'black')
             ax.tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
             ax.set_xlim(self.Rmin, self.Rmax)

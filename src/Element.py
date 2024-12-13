@@ -143,6 +143,26 @@ class Element:
         Xi = sol.x
         return Xi
     
+    def ElementalInterpolationREFERENCE(self,XI,Fe):
+        """ 
+        Interpolate field F on REFERENCE element with nodal values Fe on point XI using elemental shape functions. 
+        """
+        F = 0
+        for i in range(self.n):
+            N, foo, foo = ShapeFunctionsReference(XI, self.ElType, self.ElOrder, i+1)
+            F += N*Fe[i]
+        return F
+    
+    def GRADElementalInterpolationREFERENCE(self,XI,Fe):
+        """ 
+        Interpolate gradient field dF on REFERENCE element with nodal values Fe on point XI using elemental shape functions derivatives. 
+        """
+        dF = np.zeros([self.dim])
+        for i in range(self.n):
+            foo, dNdxi, dNdeta = ShapeFunctionsReference(XI, self.ElType, self.ElOrder, i+1)
+            dF += np.array([dNdxi,dNdeta])*Fe[i]
+        return dF
+    
     def ElementalInterpolationPHYSICAL(self,X,Fe):
         """ 
         Interpolate field F with nodal values Fe on point X using elemental shape functions. 
@@ -150,15 +170,12 @@ class Element:
         XI = self.InverseMapping(X)
         return self.ElementalInterpolationREFERENCE(XI,Fe)
     
-    def ElementalInterpolationREFERENCE(self,XI,Fe):
+    def GRADElementalInterpolationPHYSICAL(self,X,Fe):
         """ 
-        Interpolate field F with nodal values Fe on point X using elemental shape functions. 
+        Interpolate gradient field dF with nodal values Fe on point X using elemental shape functions derivatives. 
         """
-        F = 0
-        for i in range(self.n):
-            N, foo, foo = ShapeFunctionsReference(XI, self.ElType, self.ElOrder, i+1)
-            F += N*Fe[i]
-        return F
+        XI = self.InverseMapping(X)
+        return self.GRADElementalInterpolationREFERENCE(XI,Fe)
     
     
     ##################################################################################################
