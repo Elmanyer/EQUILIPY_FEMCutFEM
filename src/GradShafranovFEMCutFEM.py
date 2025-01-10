@@ -69,7 +69,8 @@ class GradShafranovFEMCutFEM:
         self.L2error_file = None            # OUTPUT FILE CONTAINING THE ERROR FIELD AND THE L2 ERROR NORM FOR THE CONVERGED SOLUTION 
         self.ELMAT_file = None              # OUTPUT FILE CONTAINING THE ELEMENTAL MATRICES FOR EACH ITERATION
         
-        # OUTPUT SWITCHS
+        # SWITCHS PARAMETERS
+        self.GhostPenalty = False
         self.PARAMS_output = False            # OUTPUT SWITCH FOR SIMULATION PARAMETERS 
         self.PSI_output = False               # OUTPUT SWITCH FOR PSI FIELD VALUES OBTAINED BY SOLVING THE CutFEM SYSTEM
         self.PSIcrit_output = False           # OUTPUT SWITCH FOR CRITICAL PSI VALUES
@@ -923,6 +924,104 @@ class GradShafranovFEMCutFEM:
         return LS
     
     
+    def ComputePSILevelSet(self,PSI):
+        
+        # OBTAIN POINTS CONFORMING THE NEW PLASMA DOMAIN BOUNDARY
+        fig, ax = plt.subplots(figsize=(6, 8))
+        cs = ax.tricontour(self.X[:,0],self.X[:,1], PSI, levels=[0])
+        
+        paths = list()
+
+        # CHECK IF CONTOUR SETS CONTAINS SADDLE POINT OR COMPUTATIONAL BOUNDARY POINTS (CLOSE ENOUGH) 
+        for item in cs.collections:
+            for path in item.get_paths():
+                path_dict = dict()
+                path_dict['coords'] = path.vertices
+                path_dict['saddlepoint'] = False
+                path_dict['compbound'] = False
+                for point in path.vertices:
+                    # COMPUTE DISTANCE TO SADDLE POINT
+                    dist_saddle = np.linalg.norm(point-self.Xcrit[1,1,0:2])
+                    # COMPUTE DISTANCE TO COMPUTATIONAL BOUNDARY NODES
+                    dist_bound = np.sqrt((self.X[self.BoundaryNodes,0]-point[0])**2+(self.X[self.BoundaryNodes,1]-point[1])**2)
+                    # CHECK IF CONTOUR CONTAINS SADDLE POINT
+                    if  dist_saddle < 0.1:
+                        path_dict['saddlepoint'] = True
+                        break
+                        # CHECK IF CONTOUR CONTAINS COMPUTATIONAL DOMAIN BOUNDARY POINTS
+                    elif np.any(dist_bound <= 0.1):
+                        path_dict['compbound'] = True
+                        break
+                paths.append(path_dict)
+
+        # DIFFERENT PROCEDURES:
+        # 1. DISCARD SETS WHICH DO NOT CONTAIN THE SADDLE POINT
+        for path in paths:
+            if not path['saddlepoint']:
+                paths.remove(path)
+
+        # IF THERE ARE MORE THAN 1 CONTOUR SET CONTAINING THE SADDLE POINT, REMOVE THE SETS CONTAINING COMPUTATIONAL BOUNDARY POINTS
+        if len(paths) > 1:
+            for path in paths:
+                if not path['compbound']:
+                    paths.remove(path)
+            # TAKE THE REMAINING SET AS THE NEW PLASMA BOUNDARY SET
+            if len(paths) == 1:
+                plasmaboundary = paths[0]['coords']
+                
+        # IF A SINGLE CONTOUR REMAINS, CHECK WHETHER IT CONTAINS COMPUTATIONAL BOUNDARIES 
+        else:
+            # IF THE REMAINING SET CONTAINS BOTH SADDLE POINT AND COMPUTATIONAL BOUNDARY POINTS
+            if paths[0]['compbound']:       
+                plasmaboundary = list()
+                oncontour = False
+                firstpass = True
+                secondpass = False
+                counter = 0
+                for path in paths:
+                    for point in path.vertices:
+                        if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and firstpass:
+                            oncontour = True 
+                            firstpass = False
+                            plasmaboundary.append(point)
+                            print('firstpass',point)
+                        elif oncontour:
+                            plasmaboundary.append(point)
+                            counter += 1
+                        if counter > 50:
+                            secondpass = True
+                            print('counter',point)
+                        if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and secondpass: 
+                            oncontour = False 
+                            print('secondpass',point)
+                                
+                plasmaboundary.append(plasmaboundary[0])
+                plasmaboundary = np.array(plasmaboundary)
+            # IF THE REMAINING SET DOES NOT CONTAIN ANY COMPUTATIONAL BOUNDARY POINT, TAKE IT AS THE NEW PLASMA BOUNDARY SET 
+            else: 
+                plasmaboundary = paths[0]['coords']
+        
+        fig.clear()
+        plt.close(fig)
+
+        # Create a Path object for the new plasma domain
+        polygon_path = mpath.Path(plasmaboundary)
+        # Check if the mesh points are inside the new plasma domain
+        inside = polygon_path.contains_points(self.X)
+        
+        # 1. INVERT SIGN DEPENDING ON SOLUTION PLASMA REGION SIGN
+        if self.PSI_0 > 0: # WHEN THE OBTAINED SOLUTION IS POSITIVE INSIDE THE PLASMA
+            PSILevSet = -PSI.copy()
+        else: # WHEN THE OBTAINED SOLUTION IS NEGATIVE INSIDE THE PLASMA
+            PSILevSet = PSI.copy()
+
+        # 2. DISCARD POINTS OUTSIDE THE PLASMA REGION
+        for inode in range(self.Nn):
+            if not inside[inode]:
+                PSILevSet[inode] = np.abs(PSILevSet[inode])
+    
+        return PSILevSet
+    
     ##################################################################################################
     ################################# VACUUM VESSEL BOUNDARY PSI_B ###################################
     ##################################################################################################
@@ -1372,12 +1471,10 @@ class GradShafranovFEMCutFEM:
         
         # FIND SOLUTION OF  GRAD(PSI) = 0   NEAR MAGNETIC AXIS AND SADDLE POINT 
         if self.it == 1:
-            self.Xcrit = np.zeros([2,2,3])  # [(iterations n, n+1), (extremum, saddle point), (R_crit,Z_crit,elem_crit)]
-            #X0_extr = np.array([6,0])
-            #X0_saddle = np.array([5,-4])
             X0_extr = np.array([self.EXTR_R0,self.EXTR_Z0],dtype=float)
             X0_saddle = np.array([self.SADD_R0,self.SADD_Z0],dtype=float)
         else:
+            # TAKE PREVIOUS SOLUTION AS INITIAL GUESS
             X0_extr = self.Xcrit[0,0,:-1]
             X0_saddle = self.Xcrit[0,1,:-1]
             
@@ -1422,8 +1519,14 @@ class GradShafranovFEMCutFEM:
                 elem = self.SearchElement(self.Xcrit[1,1,:-1],np.concatenate((self.VacuumElems,self.PlasmaBoundElems,self.PlasmaElems),axis=0))
                 self.Xcrit[1,1,-1] = elem
             else:
-                print("SADDLE POINT NOT FOUND. TAKING PREVIOUS SOLUTION")
-                self.Xcrit[1,1,:] = self.Xcrit[0,1,:]
+                if self.it == 1:
+                    print("SADDLE POINT NOT FOUND. TAKING SOLUTION AT INITIAL GUESS")
+                    elem = self.SearchElement(self.Xcrit[0,1,:-1],self.PlasmaBoundElems)
+                    self.Xcrit[1,1,:-1] = self.Xcrit[0,1,:-1]
+                    self.Xcrit[1,1,-1] = elem
+                else:
+                    print("SADDLE POINT NOT FOUND. TAKING PREVIOUS SOLUTION")
+                    self.Xcrit[1,1,:] = self.Xcrit[0,1,:]
                 
             # INTERPOLATE PSI VALUE ON CRITICAL POINT
             self.PSI_X = self.Elements[int(self.Xcrit[1,1,-1])].ElementalInterpolationPHYSICAL(self.Xcrit[1,1,:-1],PSI[self.Elements[int(self.Xcrit[1,1,-1])].Te]) 
@@ -1434,7 +1537,7 @@ class GradShafranovFEMCutFEM:
             self.PSI_X = 0
             
         return 
-    
+
     
     def NormalisePSI(self):
         """
@@ -1488,34 +1591,44 @@ class GradShafranovFEMCutFEM:
                 - "PSI_B"    : Boundary flux (used for external convergence).
         """
         if VALUES == "PSI_NORM":
-            # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
-            if np.linalg.norm(self.PSI_NORM[:,1]) > 0:
-                L2residu = np.linalg.norm(self.PSI_NORM[:,1] - self.PSI_NORM[:,0])/np.linalg.norm(self.PSI_NORM[:,1])
-            else: 
-                L2residu = np.linalg.norm(self.PSI_NORM[:,1] - self.PSI_NORM[:,0])
-            if L2residu < self.INT_TOL:
-                self.converg_INT = True   # STOP INTERNAL WHILE LOOP 
+            # FOR THE LINEAR AND ZHENG MODELS (FIXED BOUNDARY) THE SOURCE TERM DOESN'T DEPEND ON PSI, THEREFORE A SINGLE INTERNAL ITERATION IS ENOUGH
+            if self.PLASMA_CURRENT == self.LINEAR_CURRENT or self.PLASMA_CURRENT == self.ZHENG_CURRENT:
+                self.converg_INT = True  # STOP INTERNAL WHILE LOOP 
+                self.residu_INT = 0
             else:
-                self.converg_INT = False
-                
-            self.residu_INT = L2residu
-            print("Internal iteration = ",self.it_INT,", PSI_NORM residu = ", L2residu)
-            print(" ")
+                # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
+                if np.linalg.norm(self.PSI_NORM[:,1]) > 0:
+                    L2residu = np.linalg.norm(self.PSI_NORM[:,1] - self.PSI_NORM[:,0])/np.linalg.norm(self.PSI_NORM[:,1])
+                else: 
+                    L2residu = np.linalg.norm(self.PSI_NORM[:,1] - self.PSI_NORM[:,0])
+                if L2residu < self.INT_TOL:
+                    self.converg_INT = True   # STOP INTERNAL WHILE LOOP 
+                else:
+                    self.converg_INT = False
+                    
+                self.residu_INT = L2residu
+                print("Internal iteration = ",self.it_INT,", PSI_NORM residu = ", L2residu)
+                print(" ")
             
         elif VALUES == "PSI_B":
-            # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
-            if np.linalg.norm(self.PSI_B[:,1]) > 0:
-                L2residu = np.linalg.norm(self.PSI_B[:,1] - self.PSI_B[:,0])/np.linalg.norm(self.PSI_B[:,1])
-            else: 
-                L2residu = np.linalg.norm(self.PSI_B[:,1] - self.PSI_B[:,0])
-            if L2residu < self.EXT_TOL:
-                self.converg_EXT = True   # STOP EXTERNAL WHILE LOOP 
+            # FOR FIXED BOUNDARY PROBLEM, THE BOUNDARY VALUES ARE ALWAYS THE SAME, THEREFORE A SINGLE EXTERNAL ITERATION IS NEEDED
+            if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY:
+                self.converg_EXT = True  # STOP EXTERNAL WHILE LOOP 
+                self.residu_EXT = 0
             else:
-                self.converg_EXT = False
-                
-            self.residu_EXT = L2residu
-            print("External iteration = ",self.it_EXT,", PSI_B residu = ", L2residu)
-            print(" ")
+                # COMPUTE L2 NORM OF RESIDUAL BETWEEN ITERATIONS
+                if np.linalg.norm(self.PSI_B[:,1]) > 0:
+                    L2residu = np.linalg.norm(self.PSI_B[:,1] - self.PSI_B[:,0])/np.linalg.norm(self.PSI_B[:,1])
+                else: 
+                    L2residu = np.linalg.norm(self.PSI_B[:,1] - self.PSI_B[:,0])
+                if L2residu < self.EXT_TOL:
+                    self.converg_EXT = True   # STOP EXTERNAL WHILE LOOP 
+                else:
+                    self.converg_EXT = False
+                    
+                self.residu_EXT = L2residu
+                print("External iteration = ",self.it_EXT,", PSI_B residu = ", L2residu)
+                print(" ")
         return 
     
     def UpdatePSI(self,VALUES):
@@ -1652,6 +1765,8 @@ class GradShafranovFEMCutFEM:
         self.Zmax = np.max(self.X[:,1])
         self.Zmin = np.min(self.X[:,1])
             
+        # INITIALISE CRITICAL POINTS ARRAY
+        self.Xcrit = np.zeros([2,2,3])  # [(iterations n, n+1), (extremum, saddle point), (R_crit,Z_crit,elem_crit)]
         return
     
     
@@ -1660,15 +1775,22 @@ class GradShafranovFEMCutFEM:
         Computes the initial level-set function values describing the plasma boundary. Negative values represent inside the plasma region.
         """
             
-        # FOR THE FIXED BOUNDARY CASE, THE PLASMA REGION SHAPE IS TAKEN AS THE COMPUTATIONAL DOMAIN, EQUIVALENT TO THE TOKAMAK'S VACUUM VESSEL
+        # FOR THE FIXED BOUNDARY CASE, WE AIM AT VALIDATING THE CORRECT INTEGRATION OF THE GRAD-SHAFRANOV'S EQUATION USING CUTFEM BY INTEGRATING 
+        # A VERSION OF THE EQUATION FOR WHICH WE POSSES AN ANALYTICAL SOLUTION. IN ORDER TO DO SO, WE WANT TO DEFINE A FIXED PLASMA BOUNDARY 
+        # SMALLER THAN THE VACUUM VESSEL (COMPUTATIONAL DOMAIN), SO THAT BOUNDARY CONDITIONS (ANALYTICAL SOLUTION) CAN WEAKLY BE IMPOSED ON THE 
+        # BOUNDARY AND THUS CHECK IF THE CUTFEM INTEGRATION SCHEME WORKS CORRECTLY.  
+        
         if self.PLASMA_BOUNDARY == self.FIXED_BOUNDARY:  
-            self.PlasmaBoundLevSet = (-1)*np.ones([self.Nn],dtype=float)
-            #for inode in self.BoundaryNodes:
-            #    self.PlasmaBoundLevSet[inode] = 0
+            #self.PlasmaBoundLevSet = (-1)*np.ones([self.Nn],dtype=float)
+            
+            self.PlasmaBoundLevSet = np.zeros([self.Nn],dtype=float)
+            for inode in range(self.Nn):
+                self.PlasmaBoundLevSet[inode] = (-1)*self.PSIAnalyticalSolution(self.X[inode,:],self.ZHENG_CURRENT)
                 
         # FOR THE FREE BOUNDARY CASE, THE INITIAL PLASMA REGION SHAPE IS DESCRIBED USING THE F4E SHAPE CONTROL POINTS
         elif self.PLASMA_BOUNDARY == self.FREE_BOUNDARY:    
             self.PlasmaBoundLevSet = self.F4E_PlasmaBoundLevSet()
+            self.Xcrit[0,1,:-1] = np.array([self.R_SADDLE,self.Z_SADDLE])
         return 
     
     def InitialiseElements(self):
@@ -1788,9 +1910,10 @@ class GradShafranovFEMCutFEM:
         print("Done!")
         
         # IDENTIFY GHOST FACES 
-        print("     -> IDENTIFY GHOST FACES...", end="")
-        self.ComputePlasmaBoundaryGhostFaces()
-        print("Done!")
+        if self.GhostPenalty:
+            print("     -> IDENTIFY GHOST FACES...", end="")
+            self.ComputePlasmaBoundaryGhostFaces()
+            print("Done!")
         
         # COMPUTE NUMERICAL INTEGRATION QUADRATURES
         print('     -> COMPUTE NUMERICAL INTEGRATION QUADRATURES...', end="")
@@ -1880,8 +2003,9 @@ class GradShafranovFEMCutFEM:
             self.Elements[ielem].ComputeAdaptedQuadratures(self.QuadratureOrder)
             
         # COMPUTE QUADRATURES FOR GHOST FACES ON PLASMA BOUNDARY ELEMENTS
-        for ielem in self.PlasmaBoundGhostElems:
-            self.Elements[ielem].ComputeGhostFacesQuadratures(self.QuadratureOrder)
+        if self.GhostPenalty:
+            for ielem in self.PlasmaBoundGhostElems:
+                self.Elements[ielem].ComputeGhostFacesQuadratures(self.QuadratureOrder)
                 
         return
     
@@ -1914,78 +2038,8 @@ class GradShafranovFEMCutFEM:
                 #   DISCARTED BECAUSE THE LEVEL-SET DESCRIBES ONLY THE PLASMA REGION GEOMETRY -> NEED TO POST-PROCESS CUTFEM
                 #   SOLUTION IN ORDER TO TAKE ITS 0-LEVEL CONTOUR ENCLOSING ONLY THE PLASMA REGION.  
                 
-                # OBTAIN POINTS CONFORMING THE NEW PLASMA DOMAIN BOUNDARY
-                fig, ax = plt.subplots(figsize=(6, 8))
-                cs = ax.tricontour(self.X[:,0],self.X[:,1], self.PSI_NORM[:,1], levels=[0])
+                self.PlasmaBoundLevSet = self.ComputePSILevelSet(self.PSI_NORM[:,1])
                 
-                paths = list()
-                for item in cs.collections:
-                    for path in item.get_paths():
-                        containsboundary = False
-                        for point in path.vertices:
-                            # CHECK IF CONTOUR CONTAINS SADDLE POINT (ONE OF ITS POINTS IS CLOSE ENOUGH)
-                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3:
-                                containsboundary = True
-                        if containsboundary:
-                            paths.append(path)
-                            
-                if len(paths) > 1:
-                    for path in paths:
-                        containscompudombound = False
-                        for point in path.vertices:
-                            # CHECK IF CONTOUR CONTAINS COMPUTATIONAL DOMAIN BOUNDARY POINTS
-                            if np.abs(point[0]-self.Rmax) < 0.2 or np.abs(point[0]-self.Rmin) < 0.2 or np.abs(point[1]-self.Zmax) < 0.1 or np.abs(point[1]-self.Zmin) < 0.1:
-                                containscompudombound = True
-                        if containscompudombound:
-                            paths.remove(path)
-                            
-                    plasmaboundary = list()
-                    for point in paths[0].vertices:
-                        plasmaboundary.append(point)
-                    plasmaboundary = np.array(plasmaboundary)
-                    
-                else:
-                    plasmaboundary = list()
-                    oncontour = False
-                    firstpass = True
-                    secondpass = False
-                    counter = 0
-                    for path in paths:
-                        for point in path.vertices:
-                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and firstpass:
-                                oncontour = True 
-                                firstpass = False
-                                plasmaboundary.append(point)
-                            elif oncontour:
-                                plasmaboundary.append(point)
-                                counter += 1
-                            if counter > 50:
-                                secondpass = True
-                            if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and secondpass: 
-                                oncontour = False 
-                                    
-                    plasmaboundary.append(plasmaboundary[0])
-                    plasmaboundary = np.array(plasmaboundary)
-                
-                fig.clear()
-                plt.close(fig)
-
-                # Create a Path object for the new plasma domain
-                polygon_path = mpath.Path(plasmaboundary)
-                # Check if the mesh points are inside the new plasma domain
-                inside = polygon_path.contains_points(self.X)
-                
-                # 1. INVERT SIGN DEPENDING ON SOLUTION PLASMA REGION SIGN
-                if self.PSI_0 > 0: # WHEN THE OBTAINED SOLUTION IS POSITIVE INSIDE THE PLASMA
-                    self.PlasmaBoundLevSet = -self.PSI_NORM[:,1].copy()
-                else: # WHEN THE OBTAINED SOLUTION IS NEGATIVE INSIDE THE PLASMA
-                    self.PlasmaBoundLevSet = self.PSI_NORM[:,1].copy()
-
-                # 2. DISCARD POINTS OUTSIDE THE PLASMA REGION
-                for inode in range(self.Nn):
-                    if not inside[inode]:
-                        self.PlasmaBoundLevSet[inode] = np.abs(self.PlasmaBoundLevSet[inode])
-
                 ###### RECOMPUTE ALL PLASMA BOUNDARY ELEMENTS ATTRIBUTES
                 # UPDATE PLASMA REGION LEVEL-SET ELEMENTAL VALUES     
                 self.UpdateElementalPlasmaLevSet()
@@ -1994,7 +2048,8 @@ class GradShafranovFEMCutFEM:
                 # RECOMPUTE PLASMA BOUNDARY APPROXIMATION and NORMAL VECTORS
                 self.ComputePlasmaBoundaryApproximation()
                 # REIDENTIFY PLASMA BOUNDARY GHOST FACES
-                self.ComputePlasmaBoundaryGhostFaces()
+                if self.GhostPenalty:
+                    self.ComputePlasmaBoundaryGhostFaces()
                 
                 ###### RECOMPUTE NUMERICAL INTEGRATION QUADRATURES
                 # COMPUTE STANDARD QUADRATURE ENTITIES FOR NON-CUT ELEMENTS
@@ -2004,8 +2059,9 @@ class GradShafranovFEMCutFEM:
                 for ielem in self.PlasmaBoundElems:
                     self.Elements[ielem].ComputeAdaptedQuadratures(self.QuadratureOrder)
                 # COMPUTE PLASMA BOUNDARY GHOST FACES QUADRATURES
-                for ielem in self.PlasmaBoundGhostElems: 
-                    self.Elements[ielem].ComputeGhostFacesQuadratures(self.QuadratureOrder)
+                if self.GhostPenalty:
+                    for ielem in self.PlasmaBoundGhostElems: 
+                        self.Elements[ielem].ComputeGhostFacesQuadratures(self.QuadratureOrder)
                     
                 # RECOMPUTE NUMBER OF NODES ON PLASMA BOUNDARY APPROXIMATION 
                 self.NnPB = self.ComputePlasmaBoundaryNumberNodes()
@@ -2081,9 +2137,12 @@ class GradShafranovFEMCutFEM:
                 for i in range(len(Tface)):  # ROWS ELEMENTAL MATRIX
                     for j in range(len(Tface)):  # COLUMNS ELEMENTAL MATRIX
                         # COMPUTE LHS MATRIX TERMS
-                        ### GHOST PENALTY TERM  [ jump(nabla(N_i))*jump(nabla(N_j)) *(Jacobiano) ]  
+                        ### GHOST PENALTY TERM  (GRADIENT JUMP) [ jump(nabla(N_i))*jump(nabla(N_j)) *(Jacobiano) ]  
                         LHSe[i,j] += self.zeta*(n_dot_Ngrad1[i]+n_dot_Ngrad0[i])*(n_dot_Ngrad1[j]+n_dot_Ngrad0[j]) * FACE0.detJg[ig] * FACE0.Wg[ig]
-                                                   
+                        ### GHOST PENALTY TERM  (SOLUTION JUMP) [ jump(N_i)*jump(N_j)]
+                        #LHSe[i,j] += self.zeta*(FACE0.Ng[ig,i]-FACE1.Ng[ig,i])*(FACE0.Ng[ig,j]-FACE1.Ng[ig,j])    
+                               
+                                                 
             # ASSEMBLE ELEMENTAL CONTRIBUTIONS INTO GLOBAL SYSTEM
             for i in range(len(Tface)):   # ROWS ELEMENTAL MATRIX
                 for j in range(len(Tface)):   # COLUMNS ELEMENTAL MATRIX
@@ -2223,9 +2282,10 @@ class GradShafranovFEMCutFEM:
             self.ELMAT_file.write('END_CUT_ELEMENTS_INTERFACE\n')
       
         # INTEGRATE GHOST PENALTY TERM OVER CUT ELEMENTS INTERNAL CUT EDGES
-        print("     Integrate ghost penalty term along cut elements internal ghost faces...", end="")
-        self.IntegrateGhostPenaltyTerms()
-        print("Done!") 
+        if self.GhostPenalty:
+            print("     Integrate ghost penalty term along cut elements internal ghost faces...", end="")
+            self.IntegrateGhostPenaltyTerms()
+            print("Done!") 
         
         print("Done!")   
         return
@@ -2804,7 +2864,7 @@ class GradShafranovFEMCutFEM:
                 self.writePlasmaBoundaryLS()
                 self.writeElementsClassification()
                 if self.plotElemsClassi_output:
-                    self.PlotClassifiedElements()
+                    self.PlotClassifiedElements(GHOSTFACES=self.GhostPenalty)
                     
                 # INNER LOOP ALGORITHM: SOLVING GRAD-SHAFRANOV BVP WITH CutFEM
                 self.AssembleGlobalSystem()                 # 0. ASSEMBLE CUTFEM SYSTEM
@@ -3220,24 +3280,24 @@ class GradShafranovFEMCutFEM:
     def PlotInterfaceValues(self):
         """ Function which plots the values PSIgseg at the interface edges, for both the plasma/vacuum interface and the vacuum vessel first wall. """
 
-        # COLLECT PSIg DATA ON PLASMA BOUNDARY
+        # IMPOSED BOUNDARY VALUES
+        ### VACUUM VESSEL FIRST WALL
+        PSI_Bg = self.PSI_B[:,1]
+        PSI_B = self.PSI[self.BoundaryNodes]
+            
+        ### PLASMA BOUNDARY
         X_Dg = np.zeros([self.NnPB,self.dim])
         PSI_Dg = np.zeros([self.NnPB])
-        X_D = np.zeros([len(self.PlasmaBoundElems)*self.n,self.dim])
-        PSI_D = np.zeros([len(self.PlasmaBoundElems)*self.n])
+        PSI_D = np.zeros([self.NnPB])
         k = 0
-        l = 0
         for ielem in self.PlasmaBoundElems:
             ELEMENT = self.Elements[ielem]
             for SEGMENT in ELEMENT.InterfApprox.Segments:
                 for inode in range(SEGMENT.ng):
                     X_Dg[k,:] = SEGMENT.Xg[inode,:]
                     PSI_Dg[k] = SEGMENT.PSIgseg[inode]
+                    PSI_D[k] = ELEMENT.ElementalInterpolationPHYSICAL(X_Dg[k,:],self.PSI[ELEMENT.Te])
                     k += 1
-            for node in range (ELEMENT.n):
-                X_D[l,:] = ELEMENT.Xe[node,:]
-                PSI_D[l] = self.PSI[ELEMENT.Te[node]]
-                l += 1
             
         fig, axs = plt.subplots(1, 2, figsize=(14,7))
         ### UPPER ROW SUBPLOTS 
@@ -3251,7 +3311,7 @@ class GradShafranovFEMCutFEM:
         linecolors_Dg = cmap(norm(PSI_Dg))
         linecolors_Bg = cmap(norm(PSI_Bg))
         axs[0].scatter(X_Dg[:,0],X_Dg[:,1],color = linecolors_Dg)
-        axs[0].scatter(X_Bg[:,0],X_Bg[:,1],color = linecolors_Bg)
+        axs[0].scatter(self.X[self.BoundaryNodes,0],self.X[self.BoundaryNodes,1],color = linecolors_Bg)
 
         # RIGHT SUBPLOT: RESULTING VALUES ON CUTFEM SYSTEM 
         axs[1].set_aspect('equal')
@@ -3259,8 +3319,8 @@ class GradShafranovFEMCutFEM:
         axs[1].set_xlim(self.Rmin-0.5,self.Rmax+0.5)
         linecolors_D = cmap(norm(PSI_D))
         linecolors_B = cmap(norm(PSI_B))
-        axs[1].scatter(X_D[:,0],X_D[:,1],color = linecolors_D)
-        axs[1].scatter(X_B[:,0],X_B[:,1],color = linecolors_B)
+        axs[1].scatter(X_Dg[:,0],X_Dg[:,1],color = linecolors_D)
+        axs[1].scatter(self.X[self.BoundaryNodes,0],self.X[self.BoundaryNodes,1],color = linecolors_B)
         fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap),ax=axs[1])
 
         plt.show()
@@ -3401,15 +3461,14 @@ class GradShafranovFEMCutFEM:
         return
 
     
-    def PlotError(self):
-        self.ComputePlasmaNodes()
+    def PlotError(self,plotnodes):
         
         AnaliticalNorm = np.zeros([self.Nn])
         for inode in range(self.Nn):
             AnaliticalNorm[inode] = self.PSIAnalyticalSolution(self.X[inode,:],self.PLASMA_CURRENT)
            
-        error = np.zeros([len(self.plasmanodes)])
-        for i, inode in enumerate(self.plasmanodes):
+        error = np.zeros([len(self.PlasmaNodes)])
+        for i, inode in enumerate(self.PlasmaNodes):
             error[i] = abs(AnaliticalNorm[inode]-self.PSI_CONV[inode])
             if error[i] == 0:
                 error[i] = 1e-15
@@ -3419,21 +3478,21 @@ class GradShafranovFEMCutFEM:
         fig, axs = plt.subplots(1, 3, figsize=(16,5))
         axs[0].set_xlim(self.Rmin,self.Rmax)
         axs[0].set_ylim(self.Zmin,self.Zmax)
-        a = axs[0].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], AnaliticalNorm[self.activenodes], levels=30)
+        a = axs[0].tricontourf(self.X[plotnodes,0],self.X[plotnodes,1], AnaliticalNorm[plotnodes], levels=30)
         axs[0].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
-        axs[0].tricontour(self.X[self.activenodes,0],self.X[self.activenodes,1], AnaliticalNorm[self.activenodes], levels=[0], colors = 'black')
+        axs[0].tricontour(self.X[plotnodes,0],self.X[plotnodes,1], AnaliticalNorm[plotnodes], levels=[0], colors = 'black')
         plt.colorbar(a, ax=axs[0])
 
         axs[1].set_xlim(self.Rmin,self.Rmax)
         axs[1].set_ylim(self.Zmin,self.Zmax)
-        a = axs[1].tricontourf(self.X[self.activenodes,0],self.X[self.activenodes,1], self.PSI_CONV[self.activenodes], levels=30)
+        a = axs[1].tricontourf(self.X[plotnodes,0],self.X[plotnodes,1], self.PSI_CONV[plotnodes], levels=30)
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         axs[1].tricontour(self.X[:,0],self.X[:,1], self.PSI_CONV, levels=[0], colors = 'black')
         plt.colorbar(a, ax=axs[1])
 
         axs[2].set_xlim(self.Rmin,self.Rmax)
         axs[2].set_ylim(self.Zmin,self.Zmax)
-        a = axs[2].tricontourf(self.X[self.plasmanodes,0],self.X[self.plasmanodes,1], np.log(error), levels=30)
+        a = axs[2].tricontourf(self.X[self.PlasmaNodes,0],self.X[self.PlasmaNodes,1], np.log(error), levels=30)
         axs[2].tricontour(self.X[:,0],self.X[:,1], self.PlasmaBoundLevSet, levels=[0], colors = 'red')
         plt.colorbar(a, ax=axs[2])
 

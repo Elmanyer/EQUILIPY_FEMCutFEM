@@ -90,6 +90,8 @@ class Element:
         self.InterfApprox = None    # PLASMA/VACUUM INTERFACE APPROXIMATION ELEMENTAL OBJECT
         self.GhostFaces = None      # LIST OF SEGMENT OBJECTS CORRESPONDING TO ELEMENTAL EDGES WHICH ARE INTEGRATED AS GHOST PENALTY TERMS
         self.Nesub = None           # NUMBER OF SUBELEMENTS GENERATED IN TESSELLATION
+        self.SubElements = None
+        self.interfedge = None
         return
     
     
@@ -284,16 +286,16 @@ class Element:
         XIintEND = np.zeros([2,2])
         self.InterfApprox.ElIntNodes = np.zeros([2,self.nedge],dtype=int)
         k = 0
-        for i in range(self.numedges):  # Loop over elemental edges
+        for iedge in range(self.numedges):  # Loop over elemental edges
             # Check for sign change along the edge
-            inode = i
-            jnode = (i + 1) % self.numedges
+            inode = iedge
+            jnode = (iedge + 1) % self.numedges
             if self.LSe[inode] * self.LSe[jnode] < 0:
                 # FIND HIGH-ORDER NODES BETWEEN VERTICES
-                edge_index = get_edge_index(self.ElType,inode,jnode)
+                #edge_index = get_edge_index(self.ElType,inode,jnode)
                 self.InterfApprox.ElIntNodes[k,:2] = [inode, jnode]
                 for knode in range(self.ElOrder-1):
-                    self.InterfApprox.ElIntNodes[k,2+knode] = self.numedges + edge_index*(self.ElOrder-1)+knode
+                    self.InterfApprox.ElIntNodes[k,2+knode] = self.numedges + iedge*(self.ElOrder-1) + knode
                     
                 if abs(XIe[jnode,0]-XIe[inode,0]) < 1e-6: # VERTICAL EDGE
                     #### DEFINE CONSTRAINT PHI FUNCTION
@@ -306,7 +308,6 @@ class Element:
                     Eta0 = 1/2  # INITIAL GUESS FOR ROOT SOLVER
                     sol = optimize.root(PHIedge, Eta0)
                     XIintEND[k,:] = [xi, sol.x]
-                    k += 1
                 else:
                     def edgeconstraint(xi):
                         # FUNCTION DEFINING THE CONSTRAINT ON THE ELEMENTAL EDGE
@@ -321,54 +322,58 @@ class Element:
                     Xi0 = 1/2  # INITIAL GUESS FOR ROOT SOLVER
                     sol = optimize.root(PHIedge, Xi0)
                     XIintEND[k,:] = [sol.x, edgeconstraint(sol.x)]
-                    k += 1
+                k += 1
                     
-        #### HIGH-ORDER INTERFACE NODES
-        # IN THIS CASE, WITH USE THE REGULARITY OF THE REFERENCE TRIANGLE TO FIND THE NODES
-        # LYING ON THE INTERFACE INSIDE THE ELEMENT. SIMILARLY TO THE INTERSECTION NODES ON THE
-        # ELEMENTAL EDGES, EACH INTERIOR NODE CAN BE FOUND BY IMPOSING TWO CONDITIONS:
-        #    - PHI = 0
-        #    - NODE ON LINE DIVIDING THE 
-        def PHI(X):
-            N, foo, foo = EvaluateReferenceShapeFunctions(X, self.ElType, self.ElOrder)
-            return N@self.LSe
+        if self.ElOrder == 1: # LINEAR ELEMENT INTERFACE APPROXIMATION -> LINEAR APPROXIMATION 
+            self.InterfApprox.XIint = XIintEND 
+        else:
+            #### HIGH-ORDER INTERFACE NODES
+            # IN THIS CASE, WITH USE THE REGULARITY OF THE REFERENCE TRIANGLE TO FIND THE NODES
+            # LYING ON THE INTERFACE INSIDE THE ELEMENT. SIMILARLY TO THE INTERSECTION NODES ON THE
+            # ELEMENTAL EDGES, EACH INTERIOR NODE CAN BE FOUND BY IMPOSING TWO CONDITIONS:
+            #    - PHI = 0
+            #    - NODE ON LINE DIVIDING THE INTERFACE ARC
+            def PHI(X):
+                N, foo, foo = EvaluateReferenceShapeFunctions(X, self.ElType, self.ElOrder)
+                return N@self.LSe
 
-        def fun(X):
-            F = np.zeros([X.shape[0]])
-            # SEPARATE GUESS VECTOR INTO INDIVIDUAL NODAL COORDINATES
-            XHO = X.reshape((self.ElOrder-1,2)) 
-            # PHI = 0 ON NODES
+            def fun(X):
+                F = np.zeros([X.shape[0]])
+                # SEPARATE GUESS VECTOR INTO INDIVIDUAL NODAL COORDINATES
+                XHO = X.reshape((self.ElOrder-1,self.dim)) 
+                # PHI = 0 ON NODES
+                for inode in range(self.ElOrder-1):
+                    F[inode] = PHI(XHO[inode,:].reshape((1,2)))
+                # EQUAL DISTANCES BETWEEN INTERFACE NODES
+                if self.ElOrder == 2:
+                    F[-1] = np.linalg.norm(XIintEND[0,:]-X)-np.linalg.norm(XIintEND[1,:]-X)
+                if self.ElOrder == 3:
+                    #### FIRST INTERVAL
+                    F[self.ElOrder-1] = np.linalg.norm(XIintEND[0,:]-XHO[0,:])-np.linalg.norm(XHO[0,:]-XHO[1,:])
+                    #### LAST INTERVAL
+                    F[-1] = np.linalg.norm(XIintEND[1,:]-XHO[-1,:])-np.linalg.norm(XHO[-1,:]-XHO[-2,:])
+                #### INTERIOR INTERVALS
+                if self.ElOrder > 3:
+                    for intv in range(self.ElOrder-3):
+                        F[self.ElOrder+intv] = np.linalg.norm(XHO[intv+1,:]-XHO[intv+2,:]) - np.linalg.norm(XHO[intv+2,:]-XHO[intv+3,:])
+                return F
+
+            # PREPARE INITIAL GUESS
+            X0 = np.zeros([(self.ElOrder-1)*2])
+            for inode in range(1,self.ElOrder):
+                X0[2*(inode-1):2*inode] = XIintEND[0,:] + np.array([(XIintEND[1,0]-XIintEND[0,0]),(XIintEND[1,1]-XIintEND[0,1])])*inode/self.ElOrder
+            X0 = X0.reshape((1,(self.ElOrder-1)*2))
+            # COMPUTE HIGH-ORDER INTERFACE NODES COORDINATES
+            sol = optimize.root(fun, X0)
+            # STORE SOLUTION NODES
+            XIintINT = np.zeros([self.ElOrder-1,2])
             for inode in range(self.ElOrder-1):
-                F[inode] = PHI(XHO[inode,:].reshape((1,2)))
-            # EQUAL DISTANCES BETWEEN INTERFACE NODES
-            if self.ElOrder == 2:
-                F[-1] = np.linalg.norm(XIintEND[0,:]-X)-np.linalg.norm(XIintEND[1,:]-X)
-            if self.ElOrder == 3:
-                #### FIRST INTERVAL
-                F[self.ElOrder-1] = np.linalg.norm(XIintEND[0,:]-XHO[0,:])-np.linalg.norm(XHO[0,:]-XHO[1,:])
-                #### LAST INTERVAL
-                F[-1] = np.linalg.norm(XIintEND[1,:]-XHO[-1,:])-np.linalg.norm(XHO[-1,:]-XHO[-2,:])
-            #### INTERIOR INTERVALS
-            if self.ElOrder > 3:
-                for intv in range(self.ElOrder-3):
-                    F[self.ElOrder+intv] = np.linalg.norm(XHO[intv+1,:]-XHO[intv+2,:]) - np.linalg.norm(XHO[intv+2,:]-XHO[intv+3,:])
-            return F
+                XIintINT[inode,:] = np.reshape(sol.x, (self.ElOrder-1,2))[inode,:]
 
-        # PREPARE INITIAL GUESS
-        X0 = np.zeros([(self.ElOrder-1)*2])
-        for inode in range(1,self.ElOrder):
-            X0[2*(inode-1):2*inode] = XIintEND[0,:] + np.array([(XIintEND[1,0]-XIintEND[0,0]),(XIintEND[1,1]-XIintEND[0,1])])*inode/self.ElOrder
-        X0 = X0.reshape((1,(self.ElOrder-1)*2))
-        # COMPUTE HIGH-ORDER INTERFACE NODES COORDINATES
-        sol = optimize.root(fun, X0)
-        # STORE SOLUTION NODES
-        XIintINT = np.zeros([self.ElOrder-1,2])
-        for inode in range(self.ElOrder-1):
-            XIintINT[inode,:] = np.reshape(sol.x, (self.ElOrder-1,2))[inode,:]
-
-        ##### STORE INTERFACE APPROXIMATION DATA IN INTERFACE OBJECT 
-        ## CONCATENATE INTERFACE NODES
-        self.InterfApprox.XIint = np.concatenate((XIintEND,XIintINT),axis=0)
+            ##### STORE INTERFACE APPROXIMATION DATA IN INTERFACE OBJECT 
+            ## CONCATENATE INTERFACE NODES
+            self.InterfApprox.XIint = np.concatenate((XIintEND,XIintINT),axis=0)
+        
         
         ## MAP BACK TO PHYSICAL SPACE
         # EVALUATE REFERENCE SHAPE FUNCTIONS AT POINTS TO MAP (INTERFACE NODES)
@@ -467,6 +472,8 @@ class Element:
                 FACE.NormalVec = ntest
             else:   # TEST POINT INSIDE ELEMENT --> NEED TO TAKE THE OPPOSITE NORMAL VECTOR
                 FACE.NormalVec = -1*ntest
+                
+        return
     
     ##################################################################################################
     ################################ ELEMENTAL TESSELLATION ##########################################
@@ -499,12 +506,12 @@ class Element:
         XeHO = XeLIN.copy()
         # MAKE IT HIGH-ORDER:
         for iedge in range(nedge):
-            inode = iedge
-            jnode = (iedge+1)%nedge
             # EDGE HIGH-ORDER NODES
             if interfedge == iedge:
                 XeHO = np.concatenate((XeHO,XintHO[2:,:]), axis=0)
             else:
+                inode = iedge
+                jnode = (iedge+1)%nedge
                 for k in range(1,ElOrder):
                     HOnode = np.array([XeLIN[inode,0]+((XeLIN[jnode,0]-XeLIN[inode,0])/ElOrder)*k,XeLIN[inode,1]+((XeLIN[jnode,1]-XeLIN[inode,1])/ElOrder)*k])
                     XeHO = np.concatenate((XeHO,HOnode.reshape((1,2))), axis=0)
@@ -540,12 +547,12 @@ class Element:
         nedge = len(XeLIN[:,0])
         XeHO = XeLIN.copy()
         for iedge in range(nedge):
-            inode = iedge
-            jnode = (iedge+1)%nedge
             # EDGE HIGH-ORDER NODES
             if interfedge == iedge:
                 XeHO = np.concatenate((XeHO,XintHO[2:,:]), axis=0)
             else:
+                inode = iedge
+                jnode = (iedge+1)%nedge
                 for k in range(1,ElOrder):
                     HOnode = np.array([XeLIN[inode,0]+((XeLIN[jnode,0]-XeLIN[inode,0])/ElOrder)*k,XeLIN[inode,1]+((XeLIN[jnode,1]-XeLIN[inode,1])/ElOrder)*k])
                     XeHO = np.concatenate((XeHO,HOnode.reshape((1,2))), axis=0)
@@ -631,13 +638,7 @@ class Element:
                     #  -> IF prod(LSe) > 0, THEN CUT SPLITS PARENT QUADRILATERAL ELEMENT INTO 2 CHILD QUADRILATERAL ELEMENTS
                     #  -> IF prod(LSe) < 0, THEN CUT SPLITS PARENT QUADRILATERAL ELEMENT INTO PENTAGON AND TRIANGLE -> PENTAGON IS SUBDIVIDED INTO 3 SUBTRIANGLES
             
-            # LEVEL-SET NODAL VALUES
-            if self.Dom == 0:  # ELEMENT CONTAINING PLASMA/VACUUM INTERFACE
-                LSe = self.LSe
-            elif self.Dom == 2:  # ELEMENT CONTAINING VACUUM VESSEL FIRST WALL
-                LSe = self.VacVessLSe
-            
-            if np.prod(LSe[:self.numedges]) > 0:  # 2 SUBQUADRILATERALS
+            if np.prod(self.LSe[:self.numedges]) > 0:  # 2 SUBQUADRILATERALS
                 Nesub = 2
                 SubElType = 2
             
@@ -895,11 +896,11 @@ class Element:
             for i in range(len(self.Te)):   # ROWS ELEMENTAL MATRIX
                 for j in range(len(self.Te)):   # COLUMNS ELEMENTAL MATRIX
                     # COMPUTE LHS MATRIX TERMS
-                    ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) *(Jacobiano*2pi*rad) ]  
+                    ### STIFFNESS TERM  [ nabla(N_i)*nabla(N_j) ]  
                     LHSe[i,j] -= Ngrad[:,j]@Ngrad[:,i]*self.detJg[ig]*self.Wg[ig]
-                    ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j *(Jacobiano*2pi*rad) ]  ONLY RESPECT TO R
+                    ### GRADIENT TERM (ASYMMETRIC)  [ (1/R)*N_i*dNdr_j ]  ONLY RESPECT TO R
                     LHSe[i,j] += (1/R)*self.Ng[ig,j]*Ngrad[0,i]*self.detJg[ig]*self.Wg[ig]
-                # COMPUTE RHS VECTOR TERMS [ (source term)*N_i*(Jacobiano *2pi*rad) ]
+                # COMPUTE RHS VECTOR TERMS [ (source term)*N_i ]
                 RHSe[i] += SourceTermg[ig] * self.Ng[ig,i] *self.detJg[ig]*self.Wg[ig]
                 
         return LHSe, RHSe
@@ -945,16 +946,16 @@ class Element:
                 for i in range(len(self.Te)):  # ROWS ELEMENTAL MATRIX
                     for j in range(len(self.Te)):  # COLUMNS ELEMENTAL MATRIX
                         # COMPUTE LHS MATRIX TERMS
-                        ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) *(Jacobiano*2pi*rad) ]  
+                        ### DIRICHLET BOUNDARY TERM  [ N_i*(n dot nabla(N_j)) ]  
                         LHSe[i,j] += SEGMENT.Ng[ig,i] * n_dot_Ngrad[j] * SEGMENT.detJg[ig] * SEGMENT.Wg[ig]
-                        ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) *(Jacobiano*2pi*rad) ]
+                        ### SYMMETRIC NITSCHE'S METHOD TERM   [ N_j*(n dot nabla(N_i)) ]
                         LHSe[i,j] += n_dot_Ngrad[i]*SEGMENT.Ng[ig,j] * SEGMENT.detJg[ig] * SEGMENT.Wg[ig]
-                        ### PENALTY TERM   [ beta * (N_i*N_j) *(Jacobiano*2pi*rad) ]
+                        ### PENALTY TERM   [ beta * (N_i*N_j) ]
                         LHSe[i,j] += beta * SEGMENT.Ng[ig,i] * SEGMENT.Ng[ig,j] * SEGMENT.detJg[ig] * SEGMENT.Wg[ig]
                     # COMPUTE RHS VECTOR TERMS 
-                    ### SYMMETRIC NITSCHE'S METHOD TERM  [ PSI_D * (n dot nabla(N_i)) * (Jacobiano *2pi*rad) ]
+                    ### SYMMETRIC NITSCHE'S METHOD TERM  [ PSI_D * (n dot nabla(N_i)) ]
                     RHSe[i] +=  SEGMENT.PSIgseg[ig] * n_dot_Ngrad[i] * SEGMENT.detJg[ig] * SEGMENT.Wg[ig]
-                    ### PENALTY TERM   [ beta * N_i * PSI_D *(Jacobiano*2pi*rad) ]
+                    ### PENALTY TERM   [ beta * N_i * PSI_D ]
                     RHSe[i] +=  beta * SEGMENT.PSIgseg[ig] * SEGMENT.Ng[ig,i] * SEGMENT.detJg[ig] * SEGMENT.Wg[ig]
         
         return LHSe, RHSe
