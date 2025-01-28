@@ -73,7 +73,7 @@ class Element:
         self.LSe = PlasmaLSe                                            # ELEMENTAL NODAL PLASMA REGION LEVEL-SET VALUES
         self.PSIe = np.zeros([self.n])                                  # ELEMENTAL NODAL PSI VALUES
         self.Dom = None                                                 # DOMAIN WHERE THE ELEMENT LIES (-1: "PLASMA"; 0: "PLASMA INTERFACE"; +1: "VACUUM" ; +2: FIRST WALL ; +3: "EXTERIOR")
-        self.neighbours = None                                          # MATRIX CONTAINING THE GLOBAL INDEXES OF NEAREST NEIGHBOURS ELEMENTS CORRESPONDING TO EACH ELEMENTAL FACE (LOCAL INDEX ORDERING FOR FACES)
+        self.neighbours = None                                          # GLOBAL INDEXES OF NEAREST NEIGHBOURS ELEMENTS CORRESPONDING TO EACH ELEMENTAL FACE (LOCAL INDEX ORDERING FOR FACES)
         
         # INTEGRATION QUADRATURES ENTITIES
         self.ng = None              # NUMBER OF GAUSS INTEGRATION NODES IN STANDARD 2D GAUSS QUADRATURE
@@ -827,14 +827,14 @@ class Element:
     
     def ComputeGhostFacesQuadratures(self,NumQuadOrder):
         
-        ######### ADAPTED QUADRATURE TO INTEGRATE OVER ELEMENTAL INTERFACE APPROXIMATION (1D)
+        ######### ADAPTED QUADRATURE TO INTEGRATE OVER ELEMENTAL GHOST FACES
         #### STANDARD REFERENCE ELEMENT QUADRATURE TO INTEGRATE LINES (1D)
         XIg1Dstand, Wg1D, Ng1D = GaussQuadrature(0,NumQuadOrder)
         #### QUADRATURE TO INTEGRATE LINES (1D)
         N1D, dNdxi1D, foo = EvaluateReferenceShapeFunctions(XIg1Dstand, 0, self.nedge-1)
                     
         ######### ADAPTED QUADRATURE TO INTERGRATE OVER ELEMENTAL GHOST FACES (1D)
-        for iseg, FACE in enumerate(self.GhostFaces):
+        for FACE in self.GhostFaces:
             FACE.ng = Ng1D
             FACE.Wg = Wg1D
             FACE.detJg = np.zeros([FACE.ng])
@@ -938,10 +938,9 @@ class Element:
             for ig in range(SEGMENT.ng):  
                 # SHAPE FUNCTIONS GRADIENT IN PHYSICAL SPACE
                 n_dot_Ngrad = SEGMENT.NormalVec@np.array([SEGMENT.dNdxig[ig,:],SEGMENT.dNdetag[ig,:]])
-                R = SEGMENT.Xg[ig,0]
                 if args:   # DIMENSIONLESS SOLUTION CASE  -->> args[0] = R0
                     n_dot_Ngrad *= args[0]
-                    R /= args[0]
+                    
                 # COMPUTE ELEMENTAL CONTRIBUTIONS AND ASSEMBLE GLOBAL SYSTEM
                 for i in range(len(self.Te)):  # ROWS ELEMENTAL MATRIX
                     for j in range(len(self.Te)):  # COLUMNS ELEMENTAL MATRIX

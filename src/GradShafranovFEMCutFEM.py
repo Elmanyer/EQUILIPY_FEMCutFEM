@@ -929,7 +929,7 @@ class GradShafranovFEMCutFEM:
         # OBTAIN POINTS CONFORMING THE NEW PLASMA DOMAIN BOUNDARY
         fig, ax = plt.subplots(figsize=(6, 8))
         cs = ax.tricontour(self.X[:,0],self.X[:,1], PSI, levels=[0])
-        
+
         paths = list()
 
         # CHECK IF CONTOUR SETS CONTAINS SADDLE POINT OR COMPUTATIONAL BOUNDARY POINTS (CLOSE ENOUGH) 
@@ -947,24 +947,26 @@ class GradShafranovFEMCutFEM:
                     # CHECK IF CONTOUR CONTAINS SADDLE POINT
                     if  dist_saddle < 0.1:
                         path_dict['saddlepoint'] = True
-                        break
                         # CHECK IF CONTOUR CONTAINS COMPUTATIONAL DOMAIN BOUNDARY POINTS
                     elif np.any(dist_bound <= 0.1):
                         path_dict['compbound'] = True
-                        break
                 paths.append(path_dict)
 
         # DIFFERENT PROCEDURES:
         # 1. DISCARD SETS WHICH DO NOT CONTAIN THE SADDLE POINT
+        paths_temp = list()
         for path in paths:
-            if not path['saddlepoint']:
-                paths.remove(path)
+            if path['saddlepoint']:
+                paths_temp.append(path)
+        paths = paths_temp.copy()        
 
         # IF THERE ARE MORE THAN 1 CONTOUR SET CONTAINING THE SADDLE POINT, REMOVE THE SETS CONTAINING COMPUTATIONAL BOUNDARY POINTS
         if len(paths) > 1:
+            paths_temp = list()
             for path in paths:
                 if not path['compbound']:
-                    paths.remove(path)
+                    paths_temp.append(path)
+            paths = paths_temp.copy()
             # TAKE THE REMAINING SET AS THE NEW PLASMA BOUNDARY SET
             if len(paths) == 1:
                 plasmaboundary = paths[0]['coords']
@@ -1000,7 +1002,7 @@ class GradShafranovFEMCutFEM:
             # IF THE REMAINING SET DOES NOT CONTAIN ANY COMPUTATIONAL BOUNDARY POINT, TAKE IT AS THE NEW PLASMA BOUNDARY SET 
             else: 
                 plasmaboundary = paths[0]['coords']
-        
+
         fig.clear()
         plt.close(fig)
 
@@ -1008,7 +1010,7 @@ class GradShafranovFEMCutFEM:
         polygon_path = mpath.Path(plasmaboundary)
         # Check if the mesh points are inside the new plasma domain
         inside = polygon_path.contains_points(self.X)
-        
+
         # 1. INVERT SIGN DEPENDING ON SOLUTION PLASMA REGION SIGN
         if self.PSI_0 > 0: # WHEN THE OBTAINED SOLUTION IS POSITIVE INSIDE THE PLASMA
             PSILevSet = -PSI.copy()
@@ -1202,7 +1204,7 @@ class GradShafranovFEMCutFEM:
                 kint += 1
             elif regionplasma > 0: # ALL PLASMA LEVEL-SET NODAL VALUES POSITIVE -> OUTSIDE PLASMA DOMAIN
                 if self.Elements[ielem].Dom == 2:  # ALREADY CLASSIFIED AS VACUUM VESSEL ELEMENT
-                    pass
+                    continue
                 else:  # IF NOT VACUUM VESSEL ELEMENTS -> VACUUM ELEMENTS
                     self.VacuumElems[kvacuu] = ielem
                     self.Elements[ielem].Dom = +1
@@ -1337,7 +1339,7 @@ class GradShafranovFEMCutFEM:
                                             Xseg = ELEM1.Xe[nodes1,:],
                                             XIseg = XIe[nodes1,:]))
             
-            # ADD GHOST FACE TO ELEMENT 1
+            # ADD GHOST FACE TO ELEMENT 2
             nodes2 = np.zeros([ELEM2.nedge],dtype=int)
             nodes2[0] = iedge2
             nodes2[1] = (iedge2+1)%ELEM2.numedges
@@ -1816,7 +1818,8 @@ class GradShafranovFEMCutFEM:
         PSI0 = np.zeros([self.Nn])
         if self.PLASMA_CURRENT == self.PROFILES_CURRENT: 
             for i in range(self.Nn):
-                PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.ZHENG_CURRENT)*0.5
+                PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.LINEAR_CURRENT)*(-0.5)
+                #PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.ZHENG_CURRENT)*0.5
         else:     
             for i in range(self.Nn):
                 PSI0[i] = self.PSIAnalyticalSolution(self.X[i,:],self.PLASMA_CURRENT)*2*random()
@@ -1861,7 +1864,7 @@ class GradShafranovFEMCutFEM:
         self.PSI_B[:,0] = self.ComputeBoundaryPSI()
         print('Done!')
         
-        ####### ASSIGN CONSTRAINT VALUES ON PLASMA AND VACCUM VESSEL BOUNDARIES
+        ####### ASSIGN CONSTRAINT VALUES ON PLASMA BOUNDARY
         print('         -> ASSIGN INITIAL BOUNDARY VALUES...', end="")
         # ASSIGN PLASMA BOUNDARY VALUES
         self.PSI_X = 0   # INITIAL CONSTRAINT VALUE ON SEPARATRIX
@@ -2809,7 +2812,7 @@ class GradShafranovFEMCutFEM:
         """
         
         # READ INPUT FILES
-        print("READ INPUT FILES...",end='')
+        print("READ INPUT FILES...")
         self.ReadMesh()
         self.ReadFixdata()
         self.ReadEQUILIdata()
@@ -3261,16 +3264,16 @@ class GradShafranovFEMCutFEM:
                     dl = 5
                 else:
                     dl = 10
-                    for j in range(ELEMENT.n):
-                        plt.plot([ELEMENT.Xe[j,0], ELEMENT.Xe[int((j+1)%ELEMENT.n),0]], 
-                                [ELEMENT.Xe[j,1], ELEMENT.Xe[int((j+1)%ELEMENT.n),1]], color='k', linewidth=1)
-                    for SEGMENT in ELEMENT.InterfApprox.Segments:
-                        # PLOT INTERFACE APPROXIMATIONS
-                        axs[0].plot(SEGMENT.Xseg[:,0],SEGMENT.Xseg[:,1], linestyle='-',color = 'red', linewidth = 2)
-                        axs[1].plot(SEGMENT.Xseg[:,0],SEGMENT.Xseg[:,1], linestyle='-',marker='o',color = 'red', linewidth = 2)
-                        # PLOT NORMAL VECTORS
-                        Xsegmean = np.mean(SEGMENT.Xseg, axis=0)
-                        axs[i].arrow(Xsegmean[0],Xsegmean[1],SEGMENT.NormalVec[0]/dl,SEGMENT.NormalVec[1]/dl,width=0.01)
+                for j in range(ELEMENT.n):
+                    plt.plot([ELEMENT.Xe[j,0], ELEMENT.Xe[int((j+1)%ELEMENT.n),0]], 
+                            [ELEMENT.Xe[j,1], ELEMENT.Xe[int((j+1)%ELEMENT.n),1]], color='k', linewidth=1)
+                for SEGMENT in ELEMENT.InterfApprox.Segments:
+                    # PLOT INTERFACE APPROXIMATIONS
+                    axs[0].plot(SEGMENT.Xseg[:,0],SEGMENT.Xseg[:,1], linestyle='-', color = 'red', linewidth = 2)
+                    axs[1].plot(SEGMENT.Xseg[:,0],SEGMENT.Xseg[:,1], linestyle='-', marker='o',color = 'red', linewidth = 2)
+                    # PLOT NORMAL VECTORS
+                    Xsegmean = np.mean(SEGMENT.Xseg, axis=0)
+                    axs[i].arrow(Xsegmean[0],Xsegmean[1],SEGMENT.NormalVec[0]/dl,SEGMENT.NormalVec[1]/dl,width=0.01)
                 
         axs[1].set_aspect('equal')
         plt.show()
