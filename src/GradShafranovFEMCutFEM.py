@@ -1548,6 +1548,7 @@ class GradShafranovFEMCutFEM:
         if self.PLASMA_BOUNDARY == self.FREE_BOUNDARY or self.PLASMA_CURRENT == self.PROFILES_CURRENT:
             for i in range(self.Nn):
                 self.PSI_NORM[i,1] = (self.PSI[i]-self.PSI_X)/np.abs(self.PSI_0-self.PSI_X)
+                #self.PSI_NORM[i,1] = (self.PSI_X-self.PSI[i])/(self.PSI_X-self.PSI_0)
         else: 
             for i in range(self.Nn):
                 self.PSI_NORM[i,1] = self.PSI[i]
@@ -2522,10 +2523,6 @@ class GradShafranovFEMCutFEM:
             self.PlasmaLevSetVals_file = open(self.outputdir+'/PlasmaBoundLS.dat', 'w')
             self.PlasmaLevSetVals_file.write('PLASMA_BOUNDARY_LEVEL_SET\n')
         
-        if self.VacVessLevSetVals_output:
-            self.VacVessLevSetVals_file = open(self.outputdir+'/VacuumVesselWallLS.dat', 'w')
-            self.VacVessLevSetVals_file.write('VACUUM_VESSEL_LEVEL_SET\n')
-        
         if self.ELMAT_output:
             self.ELMAT_file = open(self.outputdir+'/ElementalMatrices.dat', 'w')
             self.ELMAT_file.write('ELEMENTAL_MATRICES_FILE\n')
@@ -2559,10 +2556,6 @@ class GradShafranovFEMCutFEM:
         if self.ElementsClassi_output:
             self.ElementsClassi_file.write('END_MESH_ELEMENTS_CLASSIFICATION')
             self.ElementsClassi_file.close()
-        
-        if self.VacVessLevSetVals_output:
-            self.VacVessLevSetVals_file.write('END_VACUUM_VESSEL_LEVEL_SET')
-            self.VacVessLevSetVals_file.close()
         
         if self.PlasmaLevSetVals_output:
             self.PlasmaLevSetVals_file.write('END_PLASMA_BOUNDARY_LEVEL_SET')
