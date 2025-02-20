@@ -26,12 +26,12 @@
 # inside this class.
 
 
-from src.GaussQuadrature import *
-from src.ShapeFunctions import *
+from GaussQuadrature import *
+from ShapeFunctions import *
 from scipy import optimize
 from itertools import chain
 import matplotlib.path as mpath
-from src.Segment import *
+from Segment import *
 
 class Element:
     
@@ -301,13 +301,13 @@ class Element:
                     #### DEFINE CONSTRAINT PHI FUNCTION
                     xi = XIe[inode,0]
                     def PHIedge(eta):
-                        X = np.array([xi,eta]).reshape((1,2))
+                        X = np.array([xi,eta[0]],dtype=float).reshape((1,2))
                         N, foo, foo = EvaluateReferenceShapeFunctions(X, self.ElType, self.ElOrder)
                         return N@self.LSe
                     #### FIND INTERSECTION POINT:
                     Eta0 = 1/2  # INITIAL GUESS FOR ROOT SOLVER
                     sol = optimize.root(PHIedge, Eta0)
-                    XIintEND[k,:] = [xi, sol.x]
+                    XIintEND[k,:] = [xi, sol.x[0]]
                 else:
                     def edgeconstraint(xi):
                         # FUNCTION DEFINING THE CONSTRAINT ON THE ELEMENTAL EDGE
@@ -321,7 +321,7 @@ class Element:
                     #### FIND INTERSECTION POINT:
                     Xi0 = 1/2  # INITIAL GUESS FOR ROOT SOLVER
                     sol = optimize.root(PHIedge, Xi0)
-                    XIintEND[k,:] = [sol.x, edgeconstraint(sol.x)]
+                    XIintEND[k,:] = [sol.x[0], edgeconstraint(sol.x[0])]
                 k += 1
                     
         if self.ElOrder == 1: # LINEAR ELEMENT INTERFACE APPROXIMATION -> LINEAR APPROXIMATION 

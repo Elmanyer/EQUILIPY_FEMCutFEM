@@ -20,7 +20,7 @@
 
 
 
-from src.Greens import *
+from Greens import *
 
 class Coil:
     """

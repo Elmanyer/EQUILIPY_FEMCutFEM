@@ -362,7 +362,7 @@ def EvaluateReferenceShapeFunctions(X, elemType, elemOrder):
         - dNdeta: shape functions derivatives respect to eta evaluated at points with coordinates X
     """
     
-    from src.Element import ElementalNumberOfNodes
+    from Element import ElementalNumberOfNodes
     ## NUMBER OF NODAL SHAPE FUNCTIONS
     n, foo = ElementalNumberOfNodes(elemType, elemOrder)
     ## NUMBER OF GAUSS INTEGRATION NODES

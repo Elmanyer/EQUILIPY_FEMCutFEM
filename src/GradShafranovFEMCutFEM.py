@@ -33,11 +33,11 @@ from random import random
 from scipy.interpolate import griddata
 from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import spsolve
-from src.GaussQuadrature import *
-from src.ShapeFunctions import *
-from src.Element import *
-from src.Magnet import *
-from src.Greens import *
+from GaussQuadrature import *
+from ShapeFunctions import *
+from Element import *
+from Magnet import *
+from Greens import *
 
 class GradShafranovFEMCutFEM:
     
@@ -980,22 +980,18 @@ class GradShafranovFEMCutFEM:
                 firstpass = True
                 secondpass = False
                 counter = 0
-                for path in paths:
-                    for point in path.vertices:
-                        if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and firstpass:
-                            oncontour = True 
-                            firstpass = False
-                            plasmaboundary.append(point)
-                            print('firstpass',point)
-                        elif oncontour:
-                            plasmaboundary.append(point)
-                            counter += 1
-                        if counter > 50:
-                            secondpass = True
-                            print('counter',point)
-                        if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and secondpass: 
-                            oncontour = False 
-                            print('secondpass',point)
+                for point in paths[0]['coords']:
+                    if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and firstpass:
+                        oncontour = True 
+                        firstpass = False
+                        plasmaboundary.append(point)
+                    elif oncontour:
+                        plasmaboundary.append(point)
+                        counter += 1
+                    if counter > 50:
+                        secondpass = True
+                    if np.linalg.norm(point-self.Xcrit[1,1,0:2]) < 0.3 and secondpass: 
+                        oncontour = False 
                                 
                 plasmaboundary.append(plasmaboundary[0])
                 plasmaboundary = np.array(plasmaboundary)
